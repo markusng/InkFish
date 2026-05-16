@@ -15,7 +15,9 @@ Env management, packaging, and test framework choices are not yet committed — 
 
 ## Run commands
 
-_The project has not been bootstrapped yet. Fill this in once `pyproject.toml` / entry point exist._
+- Set up env / install: `uv sync`
+- Run the editor: `uv run inkfish [path]`
+- Run tests: `uv run pytest`
 
 ## Architecture
 
