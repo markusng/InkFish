@@ -41,6 +41,7 @@ class EditorPane(QWidget):
         self._mode: Mode = Mode.SOURCE
         self._suppress_dirty = False
         self._vim_engine = None
+        self._highlighter = None
 
         self._doc_item.document().modificationChanged.connect(self._on_modification_changed)
         self._view.zoom_changed.connect(self.zoom_changed)
@@ -176,6 +177,17 @@ class EditorPane(QWidget):
         finally:
             self._suppress_dirty = False
         self._doc_item.document().setModified(False)
+        self._update_highlighter()
+
+    def _update_highlighter(self) -> None:
+        from .highlighter import create_highlighter
+        if self._highlighter is not None:
+            self._highlighter.setDocument(None)
+            self._highlighter = None
+        if self._mode is Mode.SOURCE:
+            self._highlighter = create_highlighter(
+                self._current_ext(), self._doc_item.document()
+            )
 
     # ---- vim mode -------------------------------------------------------------
 

@@ -54,6 +54,7 @@ MainWindow  (QMainWindow)
 | `editor_subwindow.py` | `EditorSubWindow(QMdiSubWindow)` — wraps `EditorPane`; saves layout to `layouts.py` on close; forwards close confirmation |
 | `canvas.py` | `InkfishView(QGraphicsView)` — zoom, pan, gesture dispatch, scroll bars, `reset_view()`, `scroll_to_document_origin()`, `set_line_numbers_visible()` |
 | `line_numbers.py` | `LineNumberItem(QGraphicsItem)` — dark gutter placed left of `DocumentItem` in the scene; auto-sizes to digit count; updates on every document change |
+| `highlighter.py` | `QSyntaxHighlighter` subclasses for Python, C/C++, JS, Markdown, HTML; `create_highlighter(ext, document)` factory |
 | `document_item.py` | `DocumentItem(QGraphicsTextItem)` — text display/edit, fold apply/unapply, Vim key intercept, Vim action application |
 | `vim.py` | `VimEngine` — pure state machine (no Qt); `process_key(key, modifiers, text) → list[Action]` |
 | `gestures.py` | `PinchHandler`, `PanHandler` — translate `QGestureEvent` into `zoom_to` / `pan_by` calls |
@@ -181,13 +182,41 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 
 ---
 
+## Syntax highlighting
+
+Handled by `highlighter.py`. All highlighters use a VSCode Dark+-inspired palette:
+
+| Colour role | Hex | Used for |
+|-------------|-----|---------|
+| Keyword | `#569cd6` bold | language keywords |
+| Built-in / type | `#4ec9b0` | built-ins, class names |
+| String | `#ce9178` | string literals |
+| Comment | `#6a9955` italic | line and block comments |
+| Number | `#b5cea8` | numeric literals |
+| Decorator / preprocessor | `#c586c0` | `@decorator`, `#include` |
+| Function name | `#dcdcaa` | name after `def` |
+
+| Extension | Highlighter | Multi-line support |
+|-----------|-------------|-------------------|
+| `.py` | `PythonHighlighter` | triple `"""` / `'''` (block states 2 / 3) |
+| `.c` `.cpp` `.h` `.c++` `.h++` | `CppHighlighter` | `/* */` (block state 1) |
+| `.js` | `JsHighlighter` | `/* */` (block state 1); backtick template strings |
+| `.md` | `MarkdownHighlighter` | headings, bold, italic, inline code, blockquotes |
+| `.html` | `HtmlHighlighter` | tags, attributes, strings, `<!-- -->` |
+| `.txt` | none | — |
+
+Highlighting is active in **SOURCE mode only**. Switching to RENDERED mode detaches the highlighter (`setDocument(None)`); switching back creates a fresh one. Block states are used for multi-line constructs — state 0 = normal, 1 = inside `/* */`, 2 = inside `"""`, 3 = inside `'''`.
+
+---
+
 ## Conventions
 
 - Multiple documents via MDI — `EditorPane` is the unit of per-document state.
 - `MainWindow` must stay thin: dispatch only, no document state.
 - `vim.py` must remain Qt-free — all Qt interaction goes through `DocumentItem`.
 - `LineNumberItem` lives in the scene alongside `DocumentItem` (hidden by default). It zooms with the rest of the content. Gutter width auto-sizes to the digit count of the last line number.
-- Monospace typography (Courier New, 11 pt) — no syntax highlighting.
+- Monospace typography (Courier New, 11 pt).
+- Syntax highlighting via `QSyntaxHighlighter` in SOURCE mode; disabled in RENDERED mode. `EditorPane._update_highlighter()` is called from `_apply_current_mode()` — it detaches the old highlighter (`setDocument(None)`) then creates a new one via `create_highlighter(ext, document)`.
 - Touchscreen + trackpad are first-class input targets.
 - No language-server dependency; folding is heuristic.
 - PyQt6 quirk: `QTextLine.cursorToX()` returns `(x, pos)` — unpack with `x, _ = ...`.
