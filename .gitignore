@@ -29,3 +29,7 @@ env/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Vim
+*.swp
+*.swo

@@ -8,7 +8,7 @@ from pathlib import Path
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="inkfish", description="Pinch-zoom text editor.")
-    parser.add_argument("path", nargs="?", type=Path, help="File to open (.txt, .md, .html).")
+    parser.add_argument("path", nargs="?", type=Path, help="File to open (.txt, .md, .html, .py, .c, .cpp, .h, .js, …).")
     parser.add_argument("--version", action="store_true", help="Print version and exit.")
     return parser.parse_args(argv)
 
@@ -27,8 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     from PyQt6.QtWidgets import QApplication
 
     from .main_window import MainWindow
+    from .splash import SplashScreen
 
     app = QApplication.instance() or QApplication(sys.argv)
+
+    SplashScreen().exec()
+
     window = MainWindow()
     if args.path is not None:
         window.open_path(args.path)

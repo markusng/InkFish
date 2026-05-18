@@ -5,16 +5,19 @@ trackpad pinch, touchscreen pinch) routes through `zoom_to` and `pan_by`.
 """
 from __future__ import annotations
 
+import math
+
 from PyQt6.QtCore import QEvent, QPointF, Qt, pyqtSignal
-from PyQt6.QtGui import QMouseEvent, QPainter, QWheelEvent
+from PyQt6.QtGui import QMouseEvent, QPainter, QTransform, QWheelEvent
 from PyQt6.QtWidgets import QGestureEvent, QGraphicsScene, QGraphicsView, QWidget
 
 from .document_item import DocumentItem
 from .gestures import PanHandler, PinchHandler
 
-MIN_SCALE = 0.1
-MAX_SCALE = 20.0
+MIN_SCALE = 0.01
+MAX_SCALE = 1000.0
 WHEEL_ZOOM_BASE = 1.0015
+ALT_ZOOM_SENSITIVITY = 0.005
 
 
 class InkfishView(QGraphicsView):
@@ -29,8 +32,8 @@ class InkfishView(QGraphicsView):
         # Generous scene rect so pan has room to work; the document item lives near origin.
         scene.setSceneRect(-20000, -20000, 40000, 40000)
 
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setRenderHints(
             QPainter.RenderHint.Antialiasing
             | QPainter.RenderHint.TextAntialiasing
@@ -43,6 +46,9 @@ class InkfishView(QGraphicsView):
 
         self._pan_active = False
         self._pan_last: QPointF | None = None
+        self._alt_zoom_active = False
+        self._alt_zoom_anchor: QPointF | None = None   # viewport pos at press
+        self._alt_zoom_start_scale: float = 1.0        # scale at press time
 
         self._pinch = PinchHandler()
         self._pan_gesture = PanHandler()
@@ -76,6 +82,25 @@ class InkfishView(QGraphicsView):
             self.scale(applied, applied)
         self.zoom_changed.emit(self.current_scale())
 
+    def scroll_to_document_origin(self) -> None:
+        """Scroll so the document's top-left corner sits at the viewport's (0, 0)."""
+        doc_tl = self.document_item.mapToScene(QPointF(0, 0))
+        vp = self.mapFromScene(doc_tl)
+        self.pan_by(-vp.x(), -vp.y())
+
+    def reset_view(self) -> None:
+        self.setTransform(QTransform())
+        self.centerOn(self.document_item)
+        self.zoom_changed.emit(self.current_scale())
+
+    def scroll_half_page(self, down: bool) -> None:
+        delta = self.viewport().height() // 2
+        self.pan_by(0, delta if down else -delta)
+
+    def scroll_page(self, down: bool) -> None:
+        delta = self.viewport().height()
+        self.pan_by(0, delta if down else -delta)
+
     def pan_by(self, dx: float, dy: float) -> None:
         """Pan by (dx, dy) in viewport pixels — moves the scene under the viewport."""
         if dx == 0 and dy == 0:
@@ -97,6 +122,14 @@ class InkfishView(QGraphicsView):
         super().wheelEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        if event.button() == Qt.MouseButton.RightButton and alt:
+            self._alt_zoom_active = True
+            self._alt_zoom_anchor = QPointF(event.position())
+            self._alt_zoom_start_scale = self.current_scale()
+            self.viewport().setCursor(Qt.CursorShape.SizeAllCursor)
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.MiddleButton:
             self._pan_active = True
             self._pan_last = QPointF(event.position())
@@ -113,9 +146,39 @@ class InkfishView(QGraphicsView):
             self.pan_by(delta.x(), delta.y())
             event.accept()
             return
+        if self._alt_zoom_active and self._alt_zoom_anchor is not None:
+            pos = event.position()
+            dx = pos.x() - self._alt_zoom_anchor.x()   # right → zoom in
+            dy = self._alt_zoom_anchor.y() - pos.y()   # up    → zoom in
+            total_delta = dx + dy
+            target_scale = self._alt_zoom_start_scale * math.exp(
+                total_delta * ALT_ZOOM_SENSITIVITY
+            )
+            factor = target_scale / self.current_scale()
+            self.zoom_to(factor, anchor=self._alt_zoom_anchor)
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Alt:
+            self.viewport().setCursor(Qt.CursorShape.SizeAllCursor)
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Alt:
+            self.viewport().unsetCursor()
+            self._alt_zoom_active = False
+            self._alt_zoom_anchor = None
+        super().keyReleaseEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.RightButton and self._alt_zoom_active:
+            self._alt_zoom_active = False
+            self._alt_zoom_anchor = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.MiddleButton and self._pan_active:
             self._pan_active = False
             self._pan_last = None

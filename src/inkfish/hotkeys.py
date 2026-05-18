@@ -16,3 +16,6 @@ def register_shortcuts(window: "MainWindow") -> None:
     window._act_quit.setShortcut(QKeySequence.StandardKey.Quit)
     window._act_toggle_mode.setShortcut(QKeySequence("Ctrl+E"))
     window._act_toggle_fold.setShortcut(QKeySequence("Ctrl+."))
+    window._act_reset_view.setShortcut(QKeySequence("Ctrl+R"))
+    window._act_vim_mode.setShortcut(QKeySequence("Ctrl+Shift+V"))
+    window._act_center_on_cursor.setShortcut(QKeySequence("Ctrl+G"))

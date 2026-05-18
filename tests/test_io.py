@@ -15,13 +15,18 @@ def test_roundtrip_supported(ext: str, tmp_path: Path) -> None:
     assert got_ext == ext
 
 
-def test_unsupported_extension_raises(tmp_path: Path) -> None:
-    path = tmp_path / "sample.py"
-    path.write_text("print('hi')", encoding="utf-8")
-    with pytest.raises(ValueError):
-        load_file(path)
-    with pytest.raises(ValueError):
-        save_file(tmp_path / "x.py", "y")
+def test_unsupported_extension_defaults_to_txt(tmp_path: Path) -> None:
+    path = tmp_path / "sample.xyz"
+    path.write_text("data", encoding="utf-8")
+    text, ext = load_file(path)
+    assert text == "data"
+    assert ext == ".txt"
+
+
+def test_unsupported_extension_save_roundtrip(tmp_path: Path) -> None:
+    path = tmp_path / "x.xyz"
+    save_file(path, "hello")
+    assert path.read_text(encoding="utf-8") == "hello"
 
 
 def test_case_insensitive_extension(tmp_path: Path) -> None:

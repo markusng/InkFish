@@ -1,8 +1,8 @@
 [project]
 name = "inkfish"
 version = "0.1.0"
-description = "Pinch-zoom and pan desktop text editor for .txt, .md, and .html."
-requires-python = ">=3.12"
+description = "Pinch-zoom and pan desktop text editor with Vim modal editing."
+requires-python = ">=3.11"
 dependencies = [
     "PyQt6>=6.6",
 ]

@@ -5,12 +5,15 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QCloseEvent
-from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
+from PyQt6.QtWidgets import (
+    QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
+)
 
 from .canvas import InkfishView
 from .hotkeys import register_shortcuts
-from .io import SUPPORTED_EXTS, file_dialog_filter, load_file, save_file
+from .io import file_dialog_filter, load_file, save_file
 from .modes import Mode, apply_mode, is_toggleable
+from . import settings
 
 
 class MainWindow(QMainWindow):
@@ -27,6 +30,7 @@ class MainWindow(QMainWindow):
         self._raw_text: str = ""
         self._mode: Mode = Mode.SOURCE
         self._suppress_dirty = False
+        self._vim_engine = None  # VimEngine | None
 
         self._build_menus()
         self._build_status_bar()
@@ -34,9 +38,22 @@ class MainWindow(QMainWindow):
 
         self._doc_item.document().modificationChanged.connect(self._on_modification_changed)
         self._view.zoom_changed.connect(self._update_zoom_label)
+        self._doc_item.vim_mode_changed.connect(self._on_vim_mode_changed)
+        self._doc_item.ex_command.connect(self._on_ex_command)
+        self._doc_item.command_buf_changed.connect(self._on_command_buf_changed)
+        self._doc_item.scroll_half_page.connect(self._view.scroll_half_page)
+        self._doc_item.scroll_page.connect(self._view.scroll_page)
+        self._doc_item.search_requested.connect(self._on_search_requested)
+        self._doc_item.search_next_signal.connect(self._on_search_next)
+
         self._update_title()
         self._update_zoom_label(1.0)
         self._update_mode_label()
+
+        # Restore saved preferences
+        prefs = settings.load()
+        if prefs.get("vim_mode"):
+            self.toggle_vim()
 
     # ---- menus / status bar ---------------------------------------------------
 
@@ -71,8 +88,25 @@ class MainWindow(QMainWindow):
         self._act_toggle_fold.triggered.connect(self.toggle_fold_at_cursor)
         view_menu.addAction(self._act_toggle_fold)
 
+        self._act_reset_view = QAction("&Reset Zoom && Pan", self)
+        self._act_reset_view.triggered.connect(self.reset_view)
+        view_menu.addAction(self._act_reset_view)
+
+        self._act_center_on_cursor = QAction("&Centre on Cursor", self)
+        self._act_center_on_cursor.triggered.connect(self.center_on_cursor)
+        view_menu.addAction(self._act_center_on_cursor)
+
+        view_menu.addSeparator()
+
+        self._act_vim_mode = QAction("&Vim Mode", self)
+        self._act_vim_mode.setCheckable(True)
+        self._act_vim_mode.triggered.connect(self.toggle_vim)
+        view_menu.addAction(self._act_vim_mode)
+
     def _build_status_bar(self) -> None:
-        from PyQt6.QtWidgets import QLabel
+        self._vim_label = QLabel("")
+        self._vim_label.setVisible(False)
+        self.statusBar().addWidget(self._vim_label)   # left-aligned
 
         self._zoom_label = QLabel("100%")
         self._mode_label = QLabel("SOURCE")
@@ -92,6 +126,7 @@ class MainWindow(QMainWindow):
         self._doc_item.document().setModified(False)
         self._update_title()
         self._update_mode_label()
+        self._view.scroll_to_document_origin()
 
     def open_file_dialog(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(
@@ -114,9 +149,6 @@ class MainWindow(QMainWindow):
         return self._save_to(Path(path_str))
 
     def _save_to(self, path: Path) -> bool:
-        if path.suffix.lower() not in SUPPORTED_EXTS:
-            QMessageBox.warning(self, "inkfish", f"Unsupported file type: {path.suffix}")
-            return False
         text = self._raw_text if self._mode is Mode.RENDERED else self._doc_item.text()
         save_file(path, text)
         self._current_path = path
@@ -124,6 +156,27 @@ class MainWindow(QMainWindow):
         self._doc_item.document().setModified(False)
         self._update_title()
         return True
+
+    # ---- view ops ------------------------------------------------------------
+
+    def reset_view(self) -> None:
+        self._view.reset_view()
+
+    def center_on_cursor(self) -> None:
+        from PyQt6.QtCore import QPointF
+        cursor = self._doc_item.textCursor()
+        block = cursor.block()
+        block_rect = self._doc_item.document().documentLayout().blockBoundingRect(block)
+        block_layout = block.layout()
+        x, y = block_rect.x(), block_rect.y()
+        if block_layout:
+            line = block_layout.lineForTextPosition(cursor.positionInBlock())
+            if line.isValid():
+                cursor_x, _ = line.cursorToX(cursor.positionInBlock())
+                x = block_rect.x() + cursor_x
+                y = block_rect.y() + line.y()
+        scene_pos = self._doc_item.mapToScene(QPointF(x, y))
+        self._view.centerOn(scene_pos)
 
     # ---- mode toggle / folding -----------------------------------------------
 
@@ -151,6 +204,66 @@ class MainWindow(QMainWindow):
         finally:
             self._suppress_dirty = False
         self._doc_item.document().setModified(False)
+
+    # ---- Vim mode ------------------------------------------------------------
+
+    def toggle_vim(self) -> None:
+        from .vim import VimEngine
+        if self._vim_engine is None:
+            self._vim_engine = VimEngine()
+            self._doc_item.set_vim(self._vim_engine)
+            self._act_vim_mode.setChecked(True)
+            self._vim_label.setText("-- NORMAL --")
+            self._vim_label.setVisible(True)
+            settings.save({**settings.load(), "vim_mode": True})
+        else:
+            self._vim_engine = None
+            self._doc_item.set_vim(None)
+            self._act_vim_mode.setChecked(False)
+            self._vim_label.setVisible(False)
+            settings.save({**settings.load(), "vim_mode": False})
+
+    def _on_vim_mode_changed(self, mode_name: str) -> None:
+        labels = {
+            "NORMAL":      "-- NORMAL --",
+            "INSERT":      "-- INSERT --",
+            "VISUAL":      "-- VISUAL --",
+            "VISUAL_LINE": "-- VISUAL LINE --",
+            "COMMAND":     "",
+        }
+        self._vim_label.setText(labels.get(mode_name, f"-- {mode_name} --"))
+
+    def _on_command_buf_changed(self, buf: str) -> None:
+        self._vim_label.setText(buf)
+
+    def _on_ex_command(self, cmd: str) -> None:
+        cmd = cmd.strip()
+        if cmd in ("w", "write"):
+            self.save()
+        elif cmd in ("q", "quit"):
+            self.close()
+        elif cmd in ("wq", "x", "write-quit"):
+            if self.save():
+                self.close()
+        elif cmd.startswith(("e ", "edit ")):
+            path_str = cmd.split(None, 1)[1].strip()
+            self.open_path(Path(path_str))
+        elif cmd == "set vim":
+            if not self._vim_engine:
+                self.toggle_vim()
+        elif cmd == "set novim":
+            if self._vim_engine:
+                self.toggle_vim()
+
+    def _on_search_requested(self, pattern: str) -> None:
+        if not pattern:
+            pattern, ok = QInputDialog.getText(self, "Search", "/")
+            if not ok or not pattern:
+                return
+        self._doc_item.do_search(pattern, forward=True)
+
+    def _on_search_next(self, forward: bool) -> None:
+        self._doc_item.do_search("", forward=forward)
 
     # ---- helpers --------------------------------------------------------------
 

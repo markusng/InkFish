@@ -26,10 +26,10 @@ def test_zoom_to_changes_scale(view: InkfishView) -> None:
 
 
 def test_zoom_clamped(view: InkfishView) -> None:
-    view.zoom_to(1000.0)
-    assert view.current_scale() <= 20.0 + 1e-6
-    view.zoom_to(1e-6)
-    assert view.current_scale() >= 0.1 - 1e-6
+    view.zoom_to(1e6)
+    assert view.current_scale() <= 1000.0 + 1e-6
+    view.zoom_to(1e-9)
+    assert view.current_scale() >= 0.01 - 1e-6
 
 
 def test_ctrl_wheel_zooms(view: InkfishView, qtbot) -> None:
