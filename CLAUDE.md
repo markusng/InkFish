@@ -68,7 +68,7 @@ MainWindow  (QMainWindow)
 ## Key patterns
 
 ### Opening a file
-`MainWindow.open_path(path)` checks if the file is already open (by path) and activates the existing sub-window rather than duplicating it. If new, calls `new_editor()` → creates `EditorPane` → `EditorSubWindow` → adds to MDI → restores layout from `layouts.py`.
+`MainWindow.open_path(path)` checks if the file is already open (by path) and activates the existing sub-window rather than duplicating it. If new, calls `new_editor()` → creates `EditorPane` → `EditorSubWindow` → adds to MDI → restores layout from `layouts.py` → calls `_push_recent(path)` to prepend to the recent files list.
 
 ### Active pane dispatch
 All View/File menu actions call `self.active_pane()` (returns `EditorPane | None`) and delegate:
@@ -116,7 +116,7 @@ Any other extension is opened as plain text (no error). Source/Rendered toggle i
 
 | Key | Action |
 |-----|--------|
-| Ctrl+O | Open file |
+| Ctrl+O | Open file (dialog); File → Open Recent lists last 10 |
 | Ctrl+S | Save active editor |
 | Ctrl+Shift+S | Save As |
 | Ctrl+Q | Quit |
@@ -174,7 +174,7 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 
 | File | Contents |
 |------|---------|
-| `~/.config/inkfish/settings.json` | `vim_mode`, `mdi_view_mode`, `session` (open file paths) |
+| `~/.config/inkfish/settings.json` | `vim_mode`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths) |
 | `~/.config/inkfish/layouts.json` | Per-file: `zoom`, `scroll_x`, `scroll_y`, `geometry [x,y,w,h]` keyed by absolute path |
 
 ---

@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent
 from PyQt6.QtWidgets import (
-    QFileDialog, QLabel, QMainWindow, QMdiArea, QMdiSubWindow,
+    QFileDialog, QLabel, QMainWindow, QMdiArea, QMdiSubWindow, QMenu,
 )
 
 from .editor_pane import EditorPane
@@ -50,6 +50,10 @@ class MainWindow(QMainWindow):
         self._act_open = QAction("&Open…", self)
         self._act_open.triggered.connect(self.open_file_dialog)
         file_menu.addAction(self._act_open)
+
+        self._recent_menu = QMenu("Open &Recent", self)
+        file_menu.addMenu(self._recent_menu)
+        self._refresh_recent_menu()
 
         self._act_save = QAction("&Save", self)
         self._act_save.triggered.connect(self.save)
@@ -174,6 +178,7 @@ class MainWindow(QMainWindow):
         sw = self.new_editor()
         pane = sw.pane
         pane.open_path(path)
+        self._push_recent(path)
         saved = layouts.get_layout(path)
         if saved:
             pane.apply_layout(
@@ -191,6 +196,44 @@ class MainWindow(QMainWindow):
         )
         if path_str:
             self.open_path(Path(path_str))
+
+    # ---- recent files ---------------------------------------------------------
+
+    _MAX_RECENT = 10
+
+    def _push_recent(self, path: Path) -> None:
+        key = str(path.resolve())
+        prefs = settings.load()
+        recent: list[str] = prefs.get("recent_files", [])
+        recent = [p for p in recent if p != key]
+        recent.insert(0, key)
+        settings.save({**prefs, "recent_files": recent[: self._MAX_RECENT]})
+        self._refresh_recent_menu()
+
+    def _refresh_recent_menu(self) -> None:
+        self._recent_menu.clear()
+        recent: list[str] = settings.load().get("recent_files", [])
+        existing = [p for p in recent if Path(p).exists()]
+        if not existing:
+            placeholder = QAction("No recent files", self)
+            placeholder.setEnabled(False)
+            self._recent_menu.addAction(placeholder)
+        else:
+            for path_str in existing:
+                p = Path(path_str)
+                act = QAction(p.name, self)
+                act.setToolTip(path_str)
+                act.setStatusTip(path_str)
+                act.triggered.connect(lambda _checked, p=p: self.open_path(p))
+                self._recent_menu.addAction(act)
+            self._recent_menu.addSeparator()
+            clear_act = QAction("Clear Recent Files", self)
+            clear_act.triggered.connect(self._clear_recent)
+            self._recent_menu.addAction(clear_act)
+
+    def _clear_recent(self) -> None:
+        settings.save({**settings.load(), "recent_files": []})
+        self._refresh_recent_menu()
 
     def close_active_editor(self) -> None:
         sw = self._mdi.activeSubWindow()
