@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QGestureEvent, QGraphicsScene, QGraphicsView, QWidge
 
 from .document_item import DocumentItem
 from .gestures import PanHandler, PinchHandler
+from .line_numbers import LineNumberItem
 
 MIN_SCALE = 0.01
 MAX_SCALE = 1000.0
@@ -29,6 +30,9 @@ class InkfishView(QGraphicsView):
 
         self.document_item = DocumentItem()
         scene.addItem(self.document_item)
+        self._line_number_item = LineNumberItem(self.document_item)
+        scene.addItem(self._line_number_item)
+        self._line_number_item.setVisible(False)
         # Generous scene rect so pan has room to work; the document item lives near origin.
         scene.setSceneRect(-20000, -20000, 40000, 40000)
 
@@ -81,6 +85,12 @@ class InkfishView(QGraphicsView):
         else:
             self.scale(applied, applied)
         self.zoom_changed.emit(self.current_scale())
+
+    def set_line_numbers_visible(self, visible: bool) -> None:
+        self._line_number_item.setVisible(visible)
+
+    def line_numbers_visible(self) -> bool:
+        return self._line_number_item.isVisible()
 
     def scroll_to_document_origin(self) -> None:
         """Scroll so the document's top-left corner sits at the viewport's (0, 0)."""

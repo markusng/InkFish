@@ -52,7 +52,8 @@ MainWindow  (QMainWindow)
 | `main_window.py` | MDI shell — `QMdiArea`, menus, status bar, signal rewiring on active-window change, session save/restore |
 | `editor_pane.py` | `EditorPane(QWidget)` — owns `_current_path`, `_raw_text`, `_mode`, `_vim_engine`; all file/view/vim/fold methods; emits `title_changed`, `zoom_changed`, `vim_mode_changed`, `mode_label_changed`, `vim_toggled`, `close_requested` |
 | `editor_subwindow.py` | `EditorSubWindow(QMdiSubWindow)` — wraps `EditorPane`; saves layout to `layouts.py` on close; forwards close confirmation |
-| `canvas.py` | `InkfishView(QGraphicsView)` — zoom, pan, gesture dispatch, scroll bars, `reset_view()`, `scroll_to_document_origin()` |
+| `canvas.py` | `InkfishView(QGraphicsView)` — zoom, pan, gesture dispatch, scroll bars, `reset_view()`, `scroll_to_document_origin()`, `set_line_numbers_visible()` |
+| `line_numbers.py` | `LineNumberItem(QGraphicsItem)` — dark gutter placed left of `DocumentItem` in the scene; auto-sizes to digit count; updates on every document change |
 | `document_item.py` | `DocumentItem(QGraphicsTextItem)` — text display/edit, fold apply/unapply, Vim key intercept, Vim action application |
 | `vim.py` | `VimEngine` — pure state machine (no Qt); `process_key(key, modifiers, text) → list[Action]` |
 | `gestures.py` | `PinchHandler`, `PanHandler` — translate `QGestureEvent` into `zoom_to` / `pan_by` calls |
@@ -126,6 +127,7 @@ Any other extension is opened as plain text (no error). Source/Rendered toggle i
 | Ctrl+. | Toggle fold at cursor |
 | Ctrl+R | Reset zoom & pan |
 | Ctrl+G | Centre canvas on text cursor |
+| Ctrl+L | Toggle line numbers |
 | Ctrl+Shift+V | Toggle Vim mode |
 | Ctrl+Shift+M | Toggle sub-window / tabbed MDI mode |
 
@@ -174,7 +176,7 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 
 | File | Contents |
 |------|---------|
-| `~/.config/inkfish/settings.json` | `vim_mode`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths) |
+| `~/.config/inkfish/settings.json` | `vim_mode`, `line_numbers`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths) |
 | `~/.config/inkfish/layouts.json` | Per-file: `zoom`, `scroll_x`, `scroll_y`, `geometry [x,y,w,h]` keyed by absolute path |
 
 ---
@@ -184,6 +186,7 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 - Multiple documents via MDI — `EditorPane` is the unit of per-document state.
 - `MainWindow` must stay thin: dispatch only, no document state.
 - `vim.py` must remain Qt-free — all Qt interaction goes through `DocumentItem`.
+- `LineNumberItem` lives in the scene alongside `DocumentItem` (hidden by default). It zooms with the rest of the content. Gutter width auto-sizes to the digit count of the last line number.
 - Monospace typography (Courier New, 11 pt) — no syntax highlighting.
 - Touchscreen + trackpad are first-class input targets.
 - No language-server dependency; folding is heuristic.

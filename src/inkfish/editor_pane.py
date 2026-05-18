@@ -17,13 +17,14 @@ from .modes import Mode, apply_mode, is_toggleable
 class EditorPane(QWidget):
     """Owns a single document: InkfishView, text state, vim engine."""
 
-    title_changed       = pyqtSignal(str)   # "name[*]" or "untitled[*]"
-    zoom_changed        = pyqtSignal(float)
-    vim_mode_changed    = pyqtSignal(str)   # VimMode name
-    command_buf_changed = pyqtSignal(str)
-    mode_label_changed  = pyqtSignal(str)   # "SOURCE" / "RENDERED"
-    vim_toggled         = pyqtSignal(bool)  # True = vim on
-    close_requested     = pyqtSignal()      # triggered by vim :q / :wq
+    title_changed        = pyqtSignal(str)   # "name[*]" or "untitled[*]"
+    zoom_changed         = pyqtSignal(float)
+    vim_mode_changed     = pyqtSignal(str)   # VimMode name
+    command_buf_changed  = pyqtSignal(str)
+    mode_label_changed   = pyqtSignal(str)   # "SOURCE" / "RENDERED"
+    vim_toggled          = pyqtSignal(bool)  # True = vim on
+    line_numbers_toggled = pyqtSignal(bool)  # True = visible
+    close_requested      = pyqtSignal()      # triggered by vim :q / :wq
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -188,6 +189,18 @@ class EditorPane(QWidget):
             self._vim_engine = None
             self._doc_item.set_vim(None)
             self.vim_toggled.emit(False)
+
+    def toggle_line_numbers(self) -> None:
+        visible = not self._view.line_numbers_visible()
+        self._view.set_line_numbers_visible(visible)
+        self.line_numbers_toggled.emit(visible)
+
+    def set_line_numbers_visible(self, visible: bool) -> None:
+        self._view.set_line_numbers_visible(visible)
+        self.line_numbers_toggled.emit(visible)
+
+    def line_numbers_visible(self) -> bool:
+        return self._view.line_numbers_visible()
 
     def set_vim_enabled(self, enabled: bool) -> None:
         if enabled and self._vim_engine is None:

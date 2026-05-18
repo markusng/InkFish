@@ -19,6 +19,7 @@ def register_shortcuts(window: "MainWindow") -> None:
     window._act_reset_view.setShortcut(QKeySequence("Ctrl+R"))
     window._act_vim_mode.setShortcut(QKeySequence("Ctrl+Shift+V"))
     window._act_center_on_cursor.setShortcut(QKeySequence("Ctrl+G"))
+    window._act_line_numbers.setShortcut(QKeySequence("Ctrl+L"))
     window._act_new_editor.setShortcut(QKeySequence("Ctrl+N"))
     window._act_close_editor.setShortcut(QKeySequence("Ctrl+W"))
     window._act_toggle_mdi_mode.setShortcut(QKeySequence("Ctrl+Shift+M"))

@@ -89,6 +89,11 @@ class MainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
+        self._act_line_numbers = QAction("Show &Line Numbers", self)
+        self._act_line_numbers.setCheckable(True)
+        self._act_line_numbers.triggered.connect(self.toggle_line_numbers)
+        view_menu.addAction(self._act_line_numbers)
+
         self._act_vim_mode = QAction("&Vim Mode", self)
         self._act_vim_mode.setCheckable(True)
         self._act_vim_mode.triggered.connect(self.toggle_vim)
@@ -163,6 +168,8 @@ class MainWindow(QMainWindow):
         prefs = settings.load()
         if prefs.get("vim_mode"):
             pane.set_vim_enabled(True)
+        if prefs.get("line_numbers"):
+            pane.set_line_numbers_visible(True)
         sw = EditorSubWindow(pane)
         self._mdi.addSubWindow(sw)
         sw.show()
@@ -266,6 +273,11 @@ class MainWindow(QMainWindow):
         if p := self.active_pane():
             p.center_on_cursor()
 
+    def toggle_line_numbers(self) -> None:
+        if p := self.active_pane():
+            p.toggle_line_numbers()
+            settings.save({**settings.load(), "line_numbers": p.line_numbers_visible()})
+
     def toggle_vim(self) -> None:
         if p := self.active_pane():
             p.toggle_vim()
@@ -305,6 +317,7 @@ class MainWindow(QMainWindow):
         pane.command_buf_changed.connect(self._on_command_buf_changed)
         pane.mode_label_changed.connect(self._mode_label.setText)
         pane.vim_toggled.connect(self._on_vim_toggled)
+        pane.line_numbers_toggled.connect(self._act_line_numbers.setChecked)
 
     def _disconnect_pane(self, pane: EditorPane) -> None:
         try:
@@ -314,6 +327,7 @@ class MainWindow(QMainWindow):
             pane.command_buf_changed.disconnect(self._on_command_buf_changed)
             pane.mode_label_changed.disconnect(self._mode_label.setText)
             pane.vim_toggled.disconnect(self._on_vim_toggled)
+            pane.line_numbers_toggled.disconnect(self._act_line_numbers.setChecked)
         except (TypeError, RuntimeError):
             pass
 
@@ -329,6 +343,7 @@ class MainWindow(QMainWindow):
             self._update_zoom_label(pane.view.current_scale())
             self._mode_label.setText(pane.mode_label())
             self._act_vim_mode.setChecked(pane.vim_enabled())
+            self._act_line_numbers.setChecked(pane.line_numbers_visible())
             if pane.vim_enabled():
                 self._vim_label.setText("-- NORMAL --")
                 self._vim_label.setVisible(True)
