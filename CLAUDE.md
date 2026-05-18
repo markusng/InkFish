@@ -55,6 +55,7 @@ MainWindow  (QMainWindow)
 | `canvas.py` | `InkfishView(QGraphicsView)` — zoom, pan, gesture dispatch, scroll bars, `reset_view()`, `scroll_to_document_origin()`, `set_line_numbers_visible()` |
 | `line_numbers.py` | `LineNumberItem(QGraphicsItem)` — dark gutter placed left of `DocumentItem` in the scene; auto-sizes to digit count; updates on every document change |
 | `highlighter.py` | `QSyntaxHighlighter` subclasses for Python, C/C++, JS, Markdown, HTML; `create_highlighter(ext, document)` factory |
+| `find_replace.py` | `FindReplaceBar(QWidget)` — inline panel docked at the bottom of each `EditorPane`; find, regex find, replace, replace all |
 | `document_item.py` | `DocumentItem(QGraphicsTextItem)` — text display/edit, fold apply/unapply, Vim key intercept, Vim action application |
 | `vim.py` | `VimEngine` — pure state machine (no Qt); `process_key(key, modifiers, text) → list[Action]` |
 | `gestures.py` | `PinchHandler`, `PanHandler` — translate `QGestureEvent` into `zoom_to` / `pan_by` calls |
@@ -128,6 +129,8 @@ Any other extension is opened as plain text (no error). Source/Rendered toggle i
 | Ctrl+. | Toggle fold at cursor |
 | Ctrl+R | Reset zoom & pan |
 | Ctrl+G | Centre canvas on text cursor |
+| Ctrl+F | Open Find bar |
+| Ctrl+H | Open Find & Replace bar |
 | Ctrl+L | Toggle line numbers |
 | Ctrl+Shift+V | Toggle Vim mode |
 | Ctrl+Shift+M | Toggle sub-window / tabbed MDI mode |
@@ -182,6 +185,31 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 
 ---
 
+## Find & Replace
+
+`FindReplaceBar` is a `QWidget` docked at the bottom of each `EditorPane` layout (hidden by default). It is **per-pane** — each editor window has its own independent search state.
+
+**Activation:**
+- `Ctrl+F` / Edit → Find — opens bar with replace row hidden
+- `Ctrl+H` / Edit → Find & Replace — opens bar with replace row visible
+- `Esc` or ✕ button — closes bar and returns focus to the document
+
+**Find row:** search field · Regex checkbox · Case checkbox · ▲ Prev · ▼ Next · match counter · ✕ close
+
+**Replace row:** replacement field · Replace (current match) · Replace All
+
+**Regex mode:** uses `QRegularExpression`; case sensitivity controlled by the `QRegularExpression` pattern options (not `QTextDocument` flags). Search field turns red when the pattern is invalid.
+
+**Plain-text mode:** uses `QTextDocument.find(str, cursor, flags)`; case sensitivity controlled by `FindFlag.FindCaseSensitively`.
+
+**Match counter** (`_update_count`) scans all matches on every keystroke and shows `current / total`. Shows "no matches" in red when nothing found.
+
+**Replace All** uses `cursor.beginEditBlock()` / `endEditBlock()` for a single undoable operation; iterates forward replacing each match and advancing the cursor to avoid infinite loops.
+
+**Pitfall fixed:** `FindReplaceBar.__init__` accesses `pane._doc_item`, so `_doc_item` must be assigned in `EditorPane.__init__` **before** `FindReplaceBar(self)` is constructed.
+
+---
+
 ## Syntax highlighting
 
 Handled by `highlighter.py`. All highlighters use a VSCode Dark+-inspired palette:
@@ -215,6 +243,7 @@ Highlighting is active in **SOURCE mode only**. Switching to RENDERED mode detac
 - `MainWindow` must stay thin: dispatch only, no document state.
 - `vim.py` must remain Qt-free — all Qt interaction goes through `DocumentItem`.
 - `LineNumberItem` lives in the scene alongside `DocumentItem` (hidden by default). It zooms with the rest of the content. Gutter width auto-sizes to the digit count of the last line number.
+- In `EditorPane.__init__`, always assign `self._doc_item = self._view.document_item` **before** constructing `FindReplaceBar(self)` — the bar accesses `pane._doc_item` immediately on construction.
 - Monospace typography (Courier New, 11 pt).
 - Syntax highlighting via `QSyntaxHighlighter` in SOURCE mode; disabled in RENDERED mode. `EditorPane._update_highlighter()` is called from `_apply_current_mode()` — it detaches the old highlighter (`setDocument(None)`) then creates a new one via `create_highlighter(ext, document)`.
 - Touchscreen + trackpad are first-class input targets.

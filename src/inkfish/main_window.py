@@ -69,6 +69,16 @@ class MainWindow(QMainWindow):
         self._act_quit.triggered.connect(self.close)
         file_menu.addAction(self._act_quit)
 
+        edit_menu = self.menuBar().addMenu("&Edit")
+
+        self._act_find = QAction("&Find…", self)
+        self._act_find.triggered.connect(self.open_find)
+        edit_menu.addAction(self._act_find)
+
+        self._act_find_replace = QAction("Find && &Replace…", self)
+        self._act_find_replace.triggered.connect(self.open_find_replace)
+        edit_menu.addAction(self._act_find_replace)
+
         view_menu = self.menuBar().addMenu("&View")
 
         self._act_toggle_mode = QAction("Toggle &Rendered/Source", self)
@@ -272,6 +282,14 @@ class MainWindow(QMainWindow):
     def center_on_cursor(self) -> None:
         if p := self.active_pane():
             p.center_on_cursor()
+
+    def open_find(self) -> None:
+        if p := self.active_pane():
+            p.open_find()
+
+    def open_find_replace(self) -> None:
+        if p := self.active_pane():
+            p.open_find_replace()
 
     def toggle_line_numbers(self) -> None:
         if p := self.active_pane():

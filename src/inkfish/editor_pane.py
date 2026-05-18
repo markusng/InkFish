@@ -36,6 +36,11 @@ class EditorPane(QWidget):
         layout.addWidget(self._view)
         self._doc_item = self._view.document_item
 
+        from .find_replace import FindReplaceBar
+        self._find_bar = FindReplaceBar(self)
+        self._find_bar.closed.connect(self._on_find_bar_closed)
+        layout.addWidget(self._find_bar)
+
         self._current_path: Path | None = None
         self._raw_text: str = ""
         self._mode: Mode = Mode.SOURCE
@@ -114,6 +119,15 @@ class EditorPane(QWidget):
         return True
 
     # ---- view ops -------------------------------------------------------------
+
+    def open_find(self) -> None:
+        self._find_bar.activate(replace=False)
+
+    def open_find_replace(self) -> None:
+        self._find_bar.activate(replace=True)
+
+    def _on_find_bar_closed(self) -> None:
+        self._doc_item.setFocus()
 
     def reset_view(self) -> None:
         self._view.reset_view()
