@@ -19,6 +19,12 @@ pip install .          # end-user
 uv run inkfish [path]              # development
 inkfish path/to/file.md            # after pip install .
 ```
+OR:  If uv is not in path, but is  pip installed 
+
+`````
+In ~/InkFish_main/src directory:
+>> python -m uv run inkfish <optional_file_to_edit.txt
+`````
 
 ## Supported formats
 
