@@ -1,59 +1,46 @@
-"""Top-level QMainWindow: hosts the canvas, menus, status bar, hotkeys."""
+"""Top-level QMainWindow: MDI shell hosting EditorSubWindows."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QCloseEvent
+from PyQt6.QtGui import QAction, QActionGroup, QCloseEvent
 from PyQt6.QtWidgets import (
-    QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
+    QFileDialog, QLabel, QMainWindow, QMdiArea, QMdiSubWindow,
 )
 
-from .canvas import InkfishView
+from .editor_pane import EditorPane
+from .editor_subwindow import EditorSubWindow
 from .hotkeys import register_shortcuts
-from .io import file_dialog_filter, load_file, save_file
-from .modes import Mode, apply_mode, is_toggleable
-from . import settings
+from .io import file_dialog_filter
+from . import layouts, settings
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("inkfish")
-        self.resize(1000, 720)
+        self.setWindowTitle("SquidPad")
+        self.resize(1280, 800)
 
-        self._view = InkfishView(self)
-        self.setCentralWidget(self._view)
-        self._doc_item = self._view.document_item
+        self._mdi = QMdiArea()
+        self._mdi.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._mdi.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setCentralWidget(self._mdi)
 
-        self._current_path: Path | None = None
-        self._raw_text: str = ""
-        self._mode: Mode = Mode.SOURCE
-        self._suppress_dirty = False
-        self._vim_engine = None  # VimEngine | None
+        self._active_pane: EditorPane | None = None
+        self._mdi_mode: str = "subwindow"
 
         self._build_menus()
         self._build_status_bar()
         register_shortcuts(self)
 
-        self._doc_item.document().modificationChanged.connect(self._on_modification_changed)
-        self._view.zoom_changed.connect(self._update_zoom_label)
-        self._doc_item.vim_mode_changed.connect(self._on_vim_mode_changed)
-        self._doc_item.ex_command.connect(self._on_ex_command)
-        self._doc_item.command_buf_changed.connect(self._on_command_buf_changed)
-        self._doc_item.scroll_half_page.connect(self._view.scroll_half_page)
-        self._doc_item.scroll_page.connect(self._view.scroll_page)
-        self._doc_item.search_requested.connect(self._on_search_requested)
-        self._doc_item.search_next_signal.connect(self._on_search_next)
-
-        self._update_title()
+        self._mdi.subWindowActivated.connect(self._on_subwindow_activated)
         self._update_zoom_label(1.0)
-        self._update_mode_label()
 
-        # Restore saved preferences
         prefs = settings.load()
-        if prefs.get("vim_mode"):
-            self.toggle_vim()
+        self._mdi_mode = prefs.get("mdi_view_mode", "subwindow")
+        self._apply_mdi_view_mode()
+        self._restore_session(prefs)
 
     # ---- menus / status bar ---------------------------------------------------
 
@@ -103,30 +90,100 @@ class MainWindow(QMainWindow):
         self._act_vim_mode.triggered.connect(self.toggle_vim)
         view_menu.addAction(self._act_vim_mode)
 
+        # ---- Window menu ----
+        win_menu = self.menuBar().addMenu("&Window")
+
+        mode_group = QActionGroup(self)
+
+        self._act_subwindow_mode = QAction("&Sub-window Mode", self)
+        self._act_subwindow_mode.setCheckable(True)
+        self._act_subwindow_mode.setChecked(True)
+        self._act_subwindow_mode.triggered.connect(
+            lambda: self._set_mdi_mode("subwindow")
+        )
+        mode_group.addAction(self._act_subwindow_mode)
+        win_menu.addAction(self._act_subwindow_mode)
+
+        self._act_tabbed_mode = QAction("&Tabbed Mode", self)
+        self._act_tabbed_mode.setCheckable(True)
+        self._act_tabbed_mode.triggered.connect(
+            lambda: self._set_mdi_mode("tabbed")
+        )
+        mode_group.addAction(self._act_tabbed_mode)
+        win_menu.addAction(self._act_tabbed_mode)
+
+        win_menu.addSeparator()
+
+        self._act_tile = QAction("&Tile Windows", self)
+        self._act_tile.triggered.connect(self._mdi.tileSubWindows)
+        win_menu.addAction(self._act_tile)
+
+        self._act_cascade = QAction("&Cascade Windows", self)
+        self._act_cascade.triggered.connect(self._mdi.cascadeSubWindows)
+        win_menu.addAction(self._act_cascade)
+
+        win_menu.addSeparator()
+
+        self._act_new_editor = QAction("&New Editor", self)
+        self._act_new_editor.triggered.connect(self.new_editor)
+        win_menu.addAction(self._act_new_editor)
+
+        self._act_close_editor = QAction("&Close Editor", self)
+        self._act_close_editor.triggered.connect(self.close_active_editor)
+        win_menu.addAction(self._act_close_editor)
+
+        self._act_toggle_mdi_mode = QAction("Toggle Sub-window/Tabbed", self)
+        self._act_toggle_mdi_mode.triggered.connect(self._toggle_mdi_mode)
+        self.addAction(self._act_toggle_mdi_mode)  # shortcut only, not in menu
+
     def _build_status_bar(self) -> None:
         self._vim_label = QLabel("")
         self._vim_label.setVisible(False)
-        self.statusBar().addWidget(self._vim_label)   # left-aligned
+        self.statusBar().addWidget(self._vim_label)
 
         self._zoom_label = QLabel("100%")
-        self._mode_label = QLabel("SOURCE")
+        self._mode_label = QLabel("")
         self.statusBar().addPermanentWidget(self._mode_label)
         self.statusBar().addPermanentWidget(self._zoom_label)
 
-    # ---- file ops -------------------------------------------------------------
+    # ---- active pane accessor -------------------------------------------------
+
+    def active_pane(self) -> EditorPane | None:
+        sw = self._mdi.activeSubWindow()
+        return sw.widget() if sw is not None else None
+
+    # ---- editor window management ---------------------------------------------
+
+    def new_editor(self) -> EditorSubWindow:
+        pane = EditorPane()
+        prefs = settings.load()
+        if prefs.get("vim_mode"):
+            pane.set_vim_enabled(True)
+        sw = EditorSubWindow(pane)
+        self._mdi.addSubWindow(sw)
+        sw.show()
+        self._mdi.setActiveSubWindow(sw)
+        return sw
 
     def open_path(self, path: Path) -> None:
-        if not self._confirm_discard_changes():
-            return
-        text, ext = load_file(path)
-        self._current_path = path
-        self._raw_text = text
-        self._mode = Mode.SOURCE
-        self._apply_current_mode()
-        self._doc_item.document().setModified(False)
-        self._update_title()
-        self._update_mode_label()
-        self._view.scroll_to_document_origin()
+        path = path.resolve()
+        for sw in self._mdi.subWindowList():
+            if sw.widget().current_path == path:
+                self._mdi.setActiveSubWindow(sw)
+                return
+        sw = self.new_editor()
+        pane = sw.pane
+        pane.open_path(path)
+        saved = layouts.get_layout(path)
+        if saved:
+            pane.apply_layout(
+                saved.get("zoom", 1.0),
+                saved.get("scroll_x", 0),
+                saved.get("scroll_y", 0),
+            )
+            if "geometry" in saved:
+                g = saved["geometry"]
+                sw.setGeometry(g[0], g[1], g[2], g[3])
 
     def open_file_dialog(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(
@@ -135,93 +192,120 @@ class MainWindow(QMainWindow):
         if path_str:
             self.open_path(Path(path_str))
 
+    def close_active_editor(self) -> None:
+        sw = self._mdi.activeSubWindow()
+        if sw is not None:
+            sw.close()
+
+    # ---- menu action delegates ------------------------------------------------
+
     def save(self) -> bool:
-        if self._current_path is None:
-            return self.save_as()
-        return self._save_to(self._current_path)
+        p = self.active_pane()
+        return p.save() if p is not None else False
 
     def save_as(self) -> bool:
-        path_str, _ = QFileDialog.getSaveFileName(
-            self, "Save file as", "", file_dialog_filter()
-        )
-        if not path_str:
-            return False
-        return self._save_to(Path(path_str))
-
-    def _save_to(self, path: Path) -> bool:
-        text = self._raw_text if self._mode is Mode.RENDERED else self._doc_item.text()
-        save_file(path, text)
-        self._current_path = path
-        self._raw_text = text
-        self._doc_item.document().setModified(False)
-        self._update_title()
-        return True
-
-    # ---- view ops ------------------------------------------------------------
-
-    def reset_view(self) -> None:
-        self._view.reset_view()
-
-    def center_on_cursor(self) -> None:
-        from PyQt6.QtCore import QPointF
-        cursor = self._doc_item.textCursor()
-        block = cursor.block()
-        block_rect = self._doc_item.document().documentLayout().blockBoundingRect(block)
-        block_layout = block.layout()
-        x, y = block_rect.x(), block_rect.y()
-        if block_layout:
-            line = block_layout.lineForTextPosition(cursor.positionInBlock())
-            if line.isValid():
-                cursor_x, _ = line.cursorToX(cursor.positionInBlock())
-                x = block_rect.x() + cursor_x
-                y = block_rect.y() + line.y()
-        scene_pos = self._doc_item.mapToScene(QPointF(x, y))
-        self._view.centerOn(scene_pos)
-
-    # ---- mode toggle / folding -----------------------------------------------
+        p = self.active_pane()
+        return p.save_as() if p is not None else False
 
     def toggle_mode(self) -> None:
-        ext = self._current_ext()
-        if not is_toggleable(ext):
-            return
-        if self._mode is Mode.SOURCE:
-            self._raw_text = self._doc_item.text()
-            self._mode = Mode.RENDERED
-        else:
-            self._mode = Mode.SOURCE
-        self._apply_current_mode()
-        self._update_mode_label()
+        if p := self.active_pane():
+            p.toggle_mode()
 
     def toggle_fold_at_cursor(self) -> None:
-        ext = self._current_ext()
-        self._doc_item.toggle_fold_at_cursor(ext)
+        if p := self.active_pane():
+            p.toggle_fold_at_cursor()
 
-    def _apply_current_mode(self) -> None:
-        self._suppress_dirty = True
-        try:
-            apply_mode(self._doc_item, self._raw_text, self._current_ext(), self._mode)
-            self._doc_item.set_editable(self._mode is Mode.SOURCE)
-        finally:
-            self._suppress_dirty = False
-        self._doc_item.document().setModified(False)
+    def reset_view(self) -> None:
+        if p := self.active_pane():
+            p.reset_view()
 
-    # ---- Vim mode ------------------------------------------------------------
+    def center_on_cursor(self) -> None:
+        if p := self.active_pane():
+            p.center_on_cursor()
 
     def toggle_vim(self) -> None:
-        from .vim import VimEngine
-        if self._vim_engine is None:
-            self._vim_engine = VimEngine()
-            self._doc_item.set_vim(self._vim_engine)
-            self._act_vim_mode.setChecked(True)
-            self._vim_label.setText("-- NORMAL --")
-            self._vim_label.setVisible(True)
-            settings.save({**settings.load(), "vim_mode": True})
+        if p := self.active_pane():
+            p.toggle_vim()
+            on = p.vim_enabled()
+            settings.save({**settings.load(), "vim_mode": on})
+
+    # ---- MDI view mode --------------------------------------------------------
+
+    def _set_mdi_mode(self, mode: str) -> None:
+        self._mdi_mode = mode
+        self._apply_mdi_view_mode()
+        settings.save({**settings.load(), "mdi_view_mode": mode})
+
+    def _toggle_mdi_mode(self) -> None:
+        self._set_mdi_mode(
+            "tabbed" if self._mdi_mode == "subwindow" else "subwindow"
+        )
+
+    def _apply_mdi_view_mode(self) -> None:
+        if self._mdi_mode == "tabbed":
+            self._mdi.setViewMode(QMdiArea.ViewMode.TabbedView)
+            self._act_tabbed_mode.setChecked(True)
+            self._act_tile.setEnabled(False)
+            self._act_cascade.setEnabled(False)
         else:
-            self._vim_engine = None
-            self._doc_item.set_vim(None)
-            self._act_vim_mode.setChecked(False)
+            self._mdi.setViewMode(QMdiArea.ViewMode.SubWindowView)
+            self._act_subwindow_mode.setChecked(True)
+            self._act_tile.setEnabled(True)
+            self._act_cascade.setEnabled(True)
+
+    # ---- signal wiring for active pane ----------------------------------------
+
+    def _connect_pane(self, pane: EditorPane) -> None:
+        pane.title_changed.connect(self._on_pane_title_changed)
+        pane.zoom_changed.connect(self._update_zoom_label)
+        pane.vim_mode_changed.connect(self._on_vim_mode_changed)
+        pane.command_buf_changed.connect(self._on_command_buf_changed)
+        pane.mode_label_changed.connect(self._mode_label.setText)
+        pane.vim_toggled.connect(self._on_vim_toggled)
+
+    def _disconnect_pane(self, pane: EditorPane) -> None:
+        try:
+            pane.title_changed.disconnect(self._on_pane_title_changed)
+            pane.zoom_changed.disconnect(self._update_zoom_label)
+            pane.vim_mode_changed.disconnect(self._on_vim_mode_changed)
+            pane.command_buf_changed.disconnect(self._on_command_buf_changed)
+            pane.mode_label_changed.disconnect(self._mode_label.setText)
+            pane.vim_toggled.disconnect(self._on_vim_toggled)
+        except (TypeError, RuntimeError):
+            pass
+
+    def _on_subwindow_activated(self, subwindow: QMdiSubWindow | None) -> None:
+        if self._active_pane is not None:
+            self._disconnect_pane(self._active_pane)
+            self._active_pane = None
+
+        if subwindow is not None:
+            pane = subwindow.widget()
+            self._active_pane = pane
+            self._connect_pane(pane)
+            self._update_zoom_label(pane.view.current_scale())
+            self._mode_label.setText(pane.mode_label())
+            self._act_vim_mode.setChecked(pane.vim_enabled())
+            if pane.vim_enabled():
+                self._vim_label.setText("-- NORMAL --")
+                self._vim_label.setVisible(True)
+            else:
+                self._vim_label.setVisible(False)
+            self.setWindowTitle(f"SquidPad — {pane.display_name()}")
+        else:
+            self._update_zoom_label(1.0)
+            self._mode_label.setText("")
             self._vim_label.setVisible(False)
-            settings.save({**settings.load(), "vim_mode": False})
+            self._act_vim_mode.setChecked(False)
+            self.setWindowTitle("SquidPad")
+
+    # ---- status bar update slots ----------------------------------------------
+
+    def _update_zoom_label(self, factor: float) -> None:
+        self._zoom_label.setText(f"{int(round(factor * 100))}%")
+
+    def _on_pane_title_changed(self, name: str) -> None:
+        self.setWindowTitle(f"SquidPad — {name}")
 
     def _on_vim_mode_changed(self, mode_name: str) -> None:
         labels = {
@@ -236,77 +320,51 @@ class MainWindow(QMainWindow):
     def _on_command_buf_changed(self, buf: str) -> None:
         self._vim_label.setText(buf)
 
-    def _on_ex_command(self, cmd: str) -> None:
-        cmd = cmd.strip()
-        if cmd in ("w", "write"):
-            self.save()
-        elif cmd in ("q", "quit"):
-            self.close()
-        elif cmd in ("wq", "x", "write-quit"):
-            if self.save():
-                self.close()
-        elif cmd.startswith(("e ", "edit ")):
-            path_str = cmd.split(None, 1)[1].strip()
-            self.open_path(Path(path_str))
-        elif cmd == "set vim":
-            if not self._vim_engine:
-                self.toggle_vim()
-        elif cmd == "set novim":
-            if self._vim_engine:
-                self.toggle_vim()
+    def _on_vim_toggled(self, on: bool) -> None:
+        self._act_vim_mode.setChecked(on)
+        if on:
+            self._vim_label.setText("-- NORMAL --")
+            self._vim_label.setVisible(True)
+        else:
+            self._vim_label.setVisible(False)
 
-    def _on_search_requested(self, pattern: str) -> None:
-        if not pattern:
-            pattern, ok = QInputDialog.getText(self, "Search", "/")
-            if not ok or not pattern:
-                return
-        self._doc_item.do_search(pattern, forward=True)
+    # ---- session save / restore -----------------------------------------------
 
-    def _on_search_next(self, forward: bool) -> None:
-        self._doc_item.do_search("", forward=forward)
+    def _restore_session(self, prefs: dict) -> None:
+        session = prefs.get("session", [])
+        active_path: str | None = None
+        for entry in session:
+            path_str = entry.get("path")
+            if path_str and Path(path_str).exists():
+                self.open_path(Path(path_str))
+                if entry.get("active"):
+                    active_path = path_str
+        # Activate the previously active window
+        if active_path:
+            for sw in self._mdi.subWindowList():
+                p = sw.widget().current_path
+                if p is not None and str(p) == active_path:
+                    self._mdi.setActiveSubWindow(sw)
+                    break
 
-    # ---- helpers --------------------------------------------------------------
+    def _save_session(self) -> None:
+        active_sw = self._mdi.activeSubWindow()
+        session = []
+        for sw in self._mdi.subWindowList():
+            path = sw.widget().current_path
+            if path is not None:
+                session.append({
+                    "path": str(path),
+                    "active": sw is active_sw,
+                })
+        settings.save({**settings.load(), "session": session})
 
-    def _current_ext(self) -> str:
-        return self._current_path.suffix.lower() if self._current_path else ".txt"
-
-    def _on_modification_changed(self, modified: bool) -> None:
-        if self._suppress_dirty:
-            return
-        self._update_title()
-
-    def _update_title(self) -> None:
-        name = self._current_path.name if self._current_path else "untitled"
-        dirty = "*" if self._doc_item.document().isModified() else ""
-        self.setWindowTitle(f"inkfish — {name}{dirty}")
-
-    def _update_zoom_label(self, factor: float) -> None:
-        self._zoom_label.setText(f"{int(round(factor * 100))}%")
-
-    def _update_mode_label(self) -> None:
-        ext = self._current_ext()
-        label = self._mode.name if is_toggleable(ext) else "SOURCE"
-        self._mode_label.setText(label)
-
-    def _confirm_discard_changes(self) -> bool:
-        if not self._doc_item.document().isModified():
-            return True
-        choice = QMessageBox.question(
-            self,
-            "inkfish",
-            "Discard unsaved changes?",
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel,
-        )
-        if choice == QMessageBox.StandardButton.Save:
-            return self.save()
-        if choice == QMessageBox.StandardButton.Discard:
-            return True
-        return False
+    # ---- close ----------------------------------------------------------------
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._confirm_discard_changes():
-            event.accept()
-        else:
-            event.ignore()
+        for sw in list(self._mdi.subWindowList()):
+            if not sw.widget().confirm_discard():
+                event.ignore()
+                return
+        self._save_session()
+        event.accept()
