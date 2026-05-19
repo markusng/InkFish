@@ -91,6 +91,13 @@ class DocumentItem(QGraphicsTextItem):
         self._vim = engine
         self._sync_interaction_flags()
 
+    def is_vim_navigation_mode(self) -> bool:
+        """True when vim is active and in NORMAL/VISUAL/VISUAL_LINE (not INSERT/COMMAND)."""
+        if self._vim is None:
+            return False
+        from .vim import VimMode
+        return self._vim.mode in (VimMode.NORMAL, VimMode.VISUAL, VimMode.VISUAL_LINE)
+
     def _sync_interaction_flags(self) -> None:
         from .vim import VimMode
         if self._vim is None or self._vim.mode == VimMode.INSERT:

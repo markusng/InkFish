@@ -293,6 +293,16 @@ class InkfishView(QGraphicsView):
     # ---- gesture dispatch -----------------------------------------------------
 
     def event(self, e: QEvent) -> bool:
+        if e.type() == QEvent.Type.ShortcutOverride:
+            # When vim is in a navigation mode, claim Ctrl+F (page down) and Ctrl+B
+            # (page up) so they reach DocumentItem.keyPressEvent instead of firing
+            # the global Find QAction.
+            if self.document_item.is_vim_navigation_mode():
+                ke = e  # QKeyEvent
+                if ke.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    if ke.key() in (Qt.Key.Key_F, Qt.Key.Key_B):
+                        e.accept()
+                        return True
         if e.type() == QEvent.Type.Gesture:
             assert isinstance(e, QGestureEvent)
             handled = False
