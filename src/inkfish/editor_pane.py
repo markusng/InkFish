@@ -282,9 +282,11 @@ class EditorPane(QWidget):
             if not ok or not pattern:
                 return
         self._doc_item.do_search(pattern, forward=True)
+        self.center_on_cursor()
 
     def _on_search_next(self, forward: bool) -> None:
         self._doc_item.do_search("", forward=forward)
+        self.center_on_cursor()
 
     def _on_ex_command(self, cmd: str) -> None:
         cmd = cmd.strip()
