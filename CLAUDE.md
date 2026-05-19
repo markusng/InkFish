@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project
 
@@ -15,12 +15,17 @@ The app presents itself to users as **SquidPad** (splash screen and window title
 - uv (env management and packaging)
 - pytest + pytest-qt (tests)
 
+Source package lives at `src/inkfish/`.
+
 ## Run commands
 
 ```
-uv sync                   # install / sync dependencies
-uv run inkfish [path]     # launch editor (path optional)
-uv run pytest             # run test suite
+uv sync                                            # install / sync dependencies
+uv run inkfish [path]                              # launch editor (path optional)
+uv run pytest                                      # run all tests
+uv run pytest tests/test_vim.py -v                 # single file
+uv run pytest tests/test_vim.py::test_name -v      # single test
+QT_QPA_PLATFORM=offscreen uv run pytest            # headless (no display)
 ```
 
 On Windows without uv on PATH: `.venv\Scripts\python -m pytest`
@@ -102,8 +107,10 @@ On startup: `MainWindow._restore_session(prefs)` re-opens each path that exists 
 - **Middle-click drag** — pan
 - **Alt + middle-click drag** — pan (middle button takes priority over zoom)
 - **Trackpad pinch / pan** — via `QGestureEvent`
-- Zoom bounds: `MIN_SCALE = 0.01`, `MAX_SCALE = 1000.0`; `ALT_ZOOM_SENSITIVITY = 0.005`
+- Zoom bounds: `MIN_SCALE = 0.1`, `MAX_SCALE = 20.0`; `ALT_ZOOM_SENSITIVITY = 0.005`
 - On file open, view scrolls so document top-left is at viewport (0, 0)
+- **Pan clamp** — optional global pref (`settings["pan_clamp"]`, default off). Toggle via View → Constrain Pan. When on, `InkfishView._clamp_scroll_to_doc()` keeps at least `PAN_CLAMP_MARGIN = 50` viewport pixels of the document in view. Hooked into `pan_by()`, `zoom_to()`, and both scroll bars' `valueChanged` (with `_in_clamp` re-entry guard).
+- **Fit Page** (`Ctrl+J`) — `InkfishView.fit_page()` computes `min(vp_w/doc_w, vp_h/doc_h)`, clamped to `[MIN_SCALE, MAX_SCALE]`, centred on the document.
 
 ---
 
@@ -129,6 +136,7 @@ Any other extension is opened as plain text (no error). Source/Rendered toggle i
 | Ctrl+. | Toggle fold at cursor |
 | Ctrl+R | Reset zoom & pan |
 | Ctrl+G | Centre canvas on text cursor |
+| Ctrl+J | Fit document to viewport (page) |
 | Ctrl+F | Open Find bar |
 | Ctrl+H | Open Find & Replace bar |
 | Ctrl+L | Toggle line numbers |
@@ -180,7 +188,7 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 
 | File | Contents |
 |------|---------|
-| `~/.config/inkfish/settings.json` | `vim_mode`, `line_numbers`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths) |
+| `~/.config/inkfish/settings.json` | `vim_mode`, `line_numbers`, `pan_clamp`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths) |
 | `~/.config/inkfish/layouts.json` | Per-file: `zoom`, `scroll_x`, `scroll_y`, `geometry [x,y,w,h]` keyed by absolute path |
 
 ---
@@ -256,10 +264,10 @@ Highlighting is active in **SOURCE mode only**. Switching to RENDERED mode detac
 ## Testing
 
 ```
-uv run pytest                        # all tests
 uv run pytest tests/test_vim.py -v   # Vim engine only (fast, no Qt)
+QT_QPA_PLATFORM=offscreen uv run pytest  # headless fallback for CI / no display
 ```
 
 Test files: `test_canvas.py` · `test_folding.py` · `test_io.py` · `test_modes.py` · `test_smoke.py` · `test_vim.py`
 
-Vim engine tests are Qt-free (~0.25 s). Canvas/smoke tests require a display (pytest-qt).
+Vim engine tests are Qt-free (~0.25 s). Canvas/smoke tests require a display (pytest-qt) or the offscreen platform.

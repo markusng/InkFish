@@ -228,6 +228,15 @@ class EditorPane(QWidget):
     def line_numbers_visible(self) -> bool:
         return self._view.line_numbers_visible()
 
+    def fit_page(self) -> None:
+        self._view.fit_page()
+
+    def set_pan_clamp(self, enabled: bool) -> None:
+        self._view.set_pan_clamp(enabled)
+
+    def pan_clamp_enabled(self) -> bool:
+        return self._view.pan_clamp_enabled()
+
     def set_vim_enabled(self, enabled: bool) -> None:
         if enabled and self._vim_engine is None:
             self.toggle_vim()

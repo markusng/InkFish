@@ -15,10 +15,11 @@ from .document_item import DocumentItem
 from .gestures import PanHandler, PinchHandler
 from .line_numbers import LineNumberItem
 
-MIN_SCALE = 0.01
-MAX_SCALE = 1000.0
+MIN_SCALE = 0.1
+MAX_SCALE = 20.0
 WHEEL_ZOOM_BASE = 1.0015
 ALT_ZOOM_SENSITIVITY = 0.005
+PAN_CLAMP_MARGIN = 50  # viewport pixels of doc edge that must remain visible when clamp is on
 
 
 class InkfishView(QGraphicsView):
@@ -60,6 +61,11 @@ class InkfishView(QGraphicsView):
         self.grabGesture(Qt.GestureType.PanGesture)
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
 
+        self._pan_clamp_enabled: bool = False
+        self._in_clamp: bool = False  # re-entry guard for scroll-bar valueChanged
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
+
     # ---- transform mutation ---------------------------------------------------
 
     def current_scale(self) -> float:
@@ -84,6 +90,7 @@ class InkfishView(QGraphicsView):
             self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         else:
             self.scale(applied, applied)
+        self._clamp_scroll_to_doc()
         self.zoom_changed.emit(self.current_scale())
 
     def set_line_numbers_visible(self, visible: bool) -> None:
@@ -101,7 +108,87 @@ class InkfishView(QGraphicsView):
     def reset_view(self) -> None:
         self.setTransform(QTransform())
         self.centerOn(self.document_item)
+        self._clamp_scroll_to_doc()
         self.zoom_changed.emit(self.current_scale())
+
+    def fit_page(self) -> None:
+        """Zoom so the whole document fits in the viewport, centred. Respects MIN/MAX_SCALE."""
+        doc_rect = self.document_item.boundingRect()
+        if doc_rect.isEmpty():
+            return
+        vp = self.viewport().rect()
+        if vp.width() <= 0 or vp.height() <= 0:
+            return
+        sx = vp.width() / doc_rect.width()
+        sy = vp.height() / doc_rect.height()
+        target = min(sx, sy)
+        target = max(MIN_SCALE, min(MAX_SCALE, target))
+        self.setTransform(QTransform.fromScale(target, target))
+        self.centerOn(self.document_item)
+        self._clamp_scroll_to_doc()
+        self.zoom_changed.emit(self.current_scale())
+
+    def set_pan_clamp(self, enabled: bool) -> None:
+        self._pan_clamp_enabled = enabled
+        if enabled:
+            self._clamp_scroll_to_doc()
+
+    def pan_clamp_enabled(self) -> bool:
+        return self._pan_clamp_enabled
+
+    def _on_scroll_value_changed(self, _value: int) -> None:
+        if self._in_clamp or not self._pan_clamp_enabled:
+            return
+        self._clamp_scroll_to_doc()
+
+    def _clamp_scroll_to_doc(self) -> None:
+        """If pan clamp is enabled, nudge scroll bars so the document keeps a margin in view."""
+        if not self._pan_clamp_enabled or self._in_clamp:
+            return
+        doc_rect_scene = self.document_item.mapRectToScene(self.document_item.boundingRect())
+        if doc_rect_scene.isEmpty():
+            return
+        doc_rect_vp = self.mapFromScene(doc_rect_scene).boundingRect()
+        vp = self.viewport().rect()
+        if vp.width() <= 0 or vp.height() <= 0:
+            return
+        margin = PAN_CLAMP_MARGIN
+        dx = 0
+        dy = 0
+        # Horizontal: clamp so at least `margin` px of doc overlaps the viewport on each side.
+        if doc_rect_vp.width() <= vp.width():
+            # Doc fits horizontally: keep entire doc inside viewport.
+            if doc_rect_vp.left() < 0:
+                dx = doc_rect_vp.left()
+            elif doc_rect_vp.right() > vp.width():
+                dx = doc_rect_vp.right() - vp.width()
+        else:
+            # Doc wider than viewport: at least `margin` of doc must be on the right and left edges.
+            if doc_rect_vp.right() < margin:
+                dx = doc_rect_vp.right() - margin
+            elif doc_rect_vp.left() > vp.width() - margin:
+                dx = doc_rect_vp.left() - (vp.width() - margin)
+        # Vertical: symmetric.
+        if doc_rect_vp.height() <= vp.height():
+            if doc_rect_vp.top() < 0:
+                dy = doc_rect_vp.top()
+            elif doc_rect_vp.bottom() > vp.height():
+                dy = doc_rect_vp.bottom() - vp.height()
+        else:
+            if doc_rect_vp.bottom() < margin:
+                dy = doc_rect_vp.bottom() - margin
+            elif doc_rect_vp.top() > vp.height() - margin:
+                dy = doc_rect_vp.top() - (vp.height() - margin)
+        if dx == 0 and dy == 0:
+            return
+        self._in_clamp = True
+        try:
+            h = self.horizontalScrollBar()
+            v = self.verticalScrollBar()
+            h.setValue(h.value() + int(round(dx)))
+            v.setValue(v.value() + int(round(dy)))
+        finally:
+            self._in_clamp = False
 
     def scroll_half_page(self, down: bool) -> None:
         delta = self.viewport().height() // 2
@@ -119,6 +206,7 @@ class InkfishView(QGraphicsView):
         v = self.verticalScrollBar()
         h.setValue(h.value() - int(round(dx)))
         v.setValue(v.value() - int(round(dy)))
+        self._clamp_scroll_to_doc()
 
     # ---- mouse fallback -------------------------------------------------------
 

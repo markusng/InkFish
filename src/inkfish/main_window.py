@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
         prefs = settings.load()
         self._mdi_mode = prefs.get("mdi_view_mode", "subwindow")
         self._apply_mdi_view_mode()
+        self._act_pan_clamp.setChecked(bool(prefs.get("pan_clamp", False)))
         self._restore_session(prefs)
 
     # ---- menus / status bar ---------------------------------------------------
@@ -97,12 +98,21 @@ class MainWindow(QMainWindow):
         self._act_center_on_cursor.triggered.connect(self.center_on_cursor)
         view_menu.addAction(self._act_center_on_cursor)
 
+        self._act_fit_page = QAction("Fit &Page", self)
+        self._act_fit_page.triggered.connect(self.fit_page)
+        view_menu.addAction(self._act_fit_page)
+
         view_menu.addSeparator()
 
         self._act_line_numbers = QAction("Show &Line Numbers", self)
         self._act_line_numbers.setCheckable(True)
         self._act_line_numbers.triggered.connect(self.toggle_line_numbers)
         view_menu.addAction(self._act_line_numbers)
+
+        self._act_pan_clamp = QAction("Constrain &Pan", self)
+        self._act_pan_clamp.setCheckable(True)
+        self._act_pan_clamp.triggered.connect(self.toggle_pan_clamp)
+        view_menu.addAction(self._act_pan_clamp)
 
         self._act_vim_mode = QAction("&Vim Mode", self)
         self._act_vim_mode.setCheckable(True)
@@ -180,6 +190,8 @@ class MainWindow(QMainWindow):
             pane.set_vim_enabled(True)
         if prefs.get("line_numbers"):
             pane.set_line_numbers_visible(True)
+        if prefs.get("pan_clamp"):
+            pane.set_pan_clamp(True)
         sw = EditorSubWindow(pane)
         self._mdi.addSubWindow(sw)
         sw.show()
@@ -282,6 +294,16 @@ class MainWindow(QMainWindow):
     def center_on_cursor(self) -> None:
         if p := self.active_pane():
             p.center_on_cursor()
+
+    def fit_page(self) -> None:
+        if p := self.active_pane():
+            p.fit_page()
+
+    def toggle_pan_clamp(self) -> None:
+        on = self._act_pan_clamp.isChecked()
+        for sw in self._mdi.subWindowList():
+            sw.widget().set_pan_clamp(on)
+        settings.save({**settings.load(), "pan_clamp": on})
 
     def open_find(self) -> None:
         if p := self.active_pane():
