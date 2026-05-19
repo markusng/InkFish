@@ -20,7 +20,6 @@ def register_shortcuts(window: "MainWindow") -> None:
     window._act_vim_mode.setShortcut(QKeySequence("Ctrl+Shift+V"))
     window._act_center_on_cursor.setShortcut(QKeySequence("Ctrl+G"))
     window._act_fit_page.setShortcut(QKeySequence("Ctrl+J"))
-    window._act_find.setShortcut(QKeySequence("Ctrl+F"))
     window._act_find_replace.setShortcut(QKeySequence("Ctrl+H"))
     window._act_line_numbers.setShortcut(QKeySequence("Ctrl+L"))
     window._act_new_editor.setShortcut(QKeySequence("Ctrl+N"))

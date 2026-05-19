@@ -137,7 +137,6 @@ Any other extension is opened as plain text (no error). Source/Rendered toggle i
 | Ctrl+R | Reset zoom & pan |
 | Ctrl+G | Centre canvas on text cursor |
 | Ctrl+J | Fit document to viewport (page) |
-| Ctrl+F | Open Find bar |
 | Ctrl+H | Open Find & Replace bar |
 | Ctrl+L | Toggle line numbers |
 | Ctrl+Shift+V | Toggle Vim mode |
@@ -198,7 +197,7 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 `FindReplaceBar` is a `QWidget` docked at the bottom of each `EditorPane` layout (hidden by default). It is **per-pane** — each editor window has its own independent search state.
 
 **Activation:**
-- `Ctrl+F` / Edit → Find — opens bar with replace row hidden
+- Edit → Find — opens bar with replace row hidden (no keyboard shortcut; `Ctrl+F` is reserved for vim page-down)
 - `Ctrl+H` / Edit → Find & Replace — opens bar with replace row visible
 - `Esc` or ✕ button — closes bar and returns focus to the document
 
