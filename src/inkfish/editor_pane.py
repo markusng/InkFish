@@ -92,7 +92,10 @@ class EditorPane(QWidget):
         self._mode = Mode.SOURCE
         self._apply_current_mode()
         self._doc_item.document().setModified(False)
-        self._view.scroll_to_document_origin()
+        # Defer until the viewport has been laid out and scroll-bar ranges
+        # are valid; otherwise the scroll values silently no-op and the view
+        # falls back to QGraphicsView's default centred state.
+        QTimer.singleShot(0, self._view.scroll_to_document_origin)
         self._emit_title()
         self.mode_label_changed.emit(self.mode_label())
 
