@@ -145,7 +145,12 @@ class InkfishView(QGraphicsView):
         """If pan clamp is enabled, nudge scroll bars so the document keeps a margin in view."""
         if not self._pan_clamp_enabled or self._in_clamp:
             return
-        doc_rect_scene = self.document_item.mapRectToScene(self.document_item.boundingRect())
+        try:
+            doc_rect_scene = self.document_item.mapRectToScene(self.document_item.boundingRect())
+        except RuntimeError:
+            # DocumentItem may already be deleted during view teardown; scroll bars can
+            # still fire valueChanged briefly after. Nothing meaningful to clamp.
+            return
         if doc_rect_scene.isEmpty():
             return
         doc_rect_vp = self.mapFromScene(doc_rect_scene).boundingRect()
