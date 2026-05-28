@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QEvent, QPointF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPointF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QMouseEvent, QPainter, QTransform, QWheelEvent
 from PyQt6.QtWidgets import QGestureEvent, QGraphicsScene, QGraphicsView, QWidget
 
+from . import lod
 from .document_item import DocumentItem
 from .gestures import PanHandler, PinchHandler
 from .line_numbers import LineNumberItem
@@ -66,10 +67,51 @@ class InkfishView(QGraphicsView):
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
         self.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
 
+        # Render hints follow zoom: skip text/edge antialiasing at sub-pixel scales.
+        self.zoom_changed.connect(lambda _s: self._apply_render_hints_for_scale())
+
+        # Drop antialiasing during active pan/zoom; restore 120 ms after motion stops.
+        self._is_navigating: bool = False
+        self._nav_restore_timer = QTimer(self)
+        self._nav_restore_timer.setSingleShot(True)
+        self._nav_restore_timer.setInterval(120)
+        self._nav_restore_timer.timeout.connect(self._on_nav_idle)
+
+        # Reduce per-frame overhead: skip 1-px antialiasing overdraw padding;
+        # items are responsible for their own painter state (save/restore).
+        self.setOptimizationFlags(
+            QGraphicsView.OptimizationFlag.DontAdjustForAntialiasing
+            | QGraphicsView.OptimizationFlag.DontSavePainterState
+        )
+
     # ---- transform mutation ---------------------------------------------------
 
     def current_scale(self) -> float:
         return self.transform().m11()
+
+    def _apply_render_hints_for_scale(self) -> None:
+        line_h = getattr(self.document_item, "_font_line_height_px", 14.7)
+        if self._is_navigating or line_h * self.transform().m22() < lod.threshold_px():
+            self.setRenderHints(QPainter.RenderHint.SmoothPixmapTransform)
+        else:
+            self.setRenderHints(
+                QPainter.RenderHint.Antialiasing
+                | QPainter.RenderHint.TextAntialiasing
+                | QPainter.RenderHint.SmoothPixmapTransform
+            )
+
+    def _set_navigating(self, active: bool) -> None:
+        if active:
+            if not self._is_navigating:
+                self._is_navigating = True
+                self._apply_render_hints_for_scale()
+            self._nav_restore_timer.start()
+        else:
+            self._is_navigating = False
+            self._apply_render_hints_for_scale()
+
+    def _on_nav_idle(self) -> None:
+        self._set_navigating(False)
 
     def zoom_to(self, factor: float, anchor: QPointF | None = None) -> None:
         if factor <= 0:
@@ -91,6 +133,7 @@ class InkfishView(QGraphicsView):
         else:
             self.scale(applied, applied)
         self._clamp_scroll_to_doc()
+        self._set_navigating(True)
         self.zoom_changed.emit(self.current_scale())
 
     def set_line_numbers_visible(self, visible: bool) -> None:
@@ -207,6 +250,7 @@ class InkfishView(QGraphicsView):
         """Pan by (dx, dy) in viewport pixels — moves the scene under the viewport."""
         if dx == 0 and dy == 0:
             return
+        self._set_navigating(True)
         h = self.horizontalScrollBar()
         v = self.verticalScrollBar()
         h.setValue(h.value() - int(round(dx)))

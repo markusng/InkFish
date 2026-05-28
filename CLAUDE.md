@@ -70,6 +70,7 @@ MainWindow  (QMainWindow)
 | `settings.py` | `load()` / `save()` — JSON prefs at `~/.config/inkfish/settings.json` |
 | `layouts.py` | `get_layout(path)` / `set_layout(path, data)` — per-file zoom/scroll/geometry at `~/.config/inkfish/layouts.json` |
 | `hotkeys.py` | `register_shortcuts()` — single binding table for all `QAction` shortcuts |
+| `lod.py` | Level-of-detail state shared by `DocumentItem` and `InkfishView`: `lod_enabled()`, `threshold_px()` and setters; constants `DEFAULT_THRESHOLD_PX`, `FALLBACK_BAR_COLOR` |
 
 ---
 
@@ -114,6 +115,18 @@ On startup: `MainWindow._restore_session(prefs)` re-opens each path that exists 
 
 ---
 
+## Screenspace LOD rendering
+
+Large files become unresponsive at extreme zoom-out because Qt rasterises every glyph in the painter's clip rect, even when multiple characters collapse to the same screen pixel. To address this, `DocumentItem.paint()` switches to a cheap density-bar rendering below a pixel-per-line threshold:
+
+- **Threshold** — `QStyleOptionGraphicsItem.levelOfDetailFromTransform(painter.worldTransform())` × `_font_line_height_px`. LOD when the product `< lod.threshold_px()` (default 4.0; tunable via `settings["lod_threshold_px"]`).
+- **LOD render** — one `fillRect()` per visible text block, width = `(len(text.rstrip()) - indent) × char_w`, left offset preserves indent, colour sampled from the dominant `block.layout().formats()` foreground (falls back to `lod.FALLBACK_BAR_COLOR` for plain text). Cached per `(block_number, revision)` up to 50k entries.
+- **InkfishView render hints** — `Antialiasing | TextAntialiasing` are dropped when below threshold (`_apply_render_hints_for_scale`, called via `zoom_changed`).
+- **LineNumberItem** — `paint()` is viewport-culled via `documentLayout().hitTest(QPointF(0, exposed.top()))` + `findBlock()` at all zoom levels.
+- **Dev toggle** — `Ctrl+Shift+L` / View → Toggle LOD turns `lod.set_enabled(False)` for A/B comparison; shows a 2 s "LOD: on/off" status-bar message.
+
+---
+
 ## Supported file formats
 
 `.txt` `.md` `.html` `.py` `.c` `.cpp` `.h` `.c++` `.h++` `.js`
@@ -141,6 +154,7 @@ Any other extension is opened as plain text (no error). Source/Rendered toggle i
 | Ctrl+L | Toggle line numbers |
 | Ctrl+Shift+V | Toggle Vim mode |
 | Ctrl+Shift+M | Toggle sub-window / tabbed MDI mode |
+| Ctrl+Shift+L | Toggle LOD rendering (dev A/B) |
 
 ---
 
@@ -187,7 +201,7 @@ Opt-in per-pane (off by default). Global preference in `settings["vim_mode"]` se
 
 | File | Contents |
 |------|---------|
-| `~/.config/inkfish/settings.json` | `vim_mode`, `line_numbers`, `pan_clamp`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths) |
+| `~/.config/inkfish/settings.json` | `vim_mode`, `line_numbers`, `pan_clamp`, `mdi_view_mode`, `session` (open file paths), `recent_files` (last 10 opened paths), `lod_threshold_px` (float, default 4.0) |
 | `~/.config/inkfish/layouts.json` | Per-file: `zoom`, `scroll_x`, `scroll_y`, `geometry [x,y,w,h]` keyed by absolute path |
 
 ---

@@ -13,7 +13,7 @@ from .editor_pane import EditorPane
 from .editor_subwindow import EditorSubWindow
 from .hotkeys import register_shortcuts
 from .io import file_dialog_filter
-from . import layouts, settings
+from . import layouts, lod, settings
 
 
 class MainWindow(QMainWindow):
@@ -41,6 +41,8 @@ class MainWindow(QMainWindow):
         self._mdi_mode = prefs.get("mdi_view_mode", "subwindow")
         self._apply_mdi_view_mode()
         self._act_pan_clamp.setChecked(bool(prefs.get("pan_clamp", False)))
+        lod.set_threshold_px(prefs.get("lod_threshold_px", lod.DEFAULT_THRESHOLD_PX))
+        self._act_toggle_lod.setChecked(lod.lod_enabled())
         self._restore_session(prefs)
 
     # ---- menus / status bar ---------------------------------------------------
@@ -118,6 +120,12 @@ class MainWindow(QMainWindow):
         self._act_vim_mode.setCheckable(True)
         self._act_vim_mode.triggered.connect(self.toggle_vim)
         view_menu.addAction(self._act_vim_mode)
+
+        self._act_toggle_lod = QAction("Toggle &LOD", self)
+        self._act_toggle_lod.setCheckable(True)
+        self._act_toggle_lod.setChecked(True)
+        self._act_toggle_lod.triggered.connect(self.toggle_lod)
+        view_menu.addAction(self._act_toggle_lod)
 
         # ---- Window menu ----
         win_menu = self.menuBar().addMenu("&Window")
@@ -323,6 +331,16 @@ class MainWindow(QMainWindow):
             p.toggle_vim()
             on = p.vim_enabled()
             settings.save({**settings.load(), "vim_mode": on})
+
+    def toggle_lod(self) -> None:
+        lod.set_enabled(not lod.lod_enabled())
+        self._act_toggle_lod.setChecked(lod.lod_enabled())
+        for sw in self._mdi.subWindowList():
+            pane = sw.widget()
+            if pane is not None:
+                pane.view.viewport().update()
+        state = "on" if lod.lod_enabled() else "off"
+        self.statusBar().showMessage(f"LOD: {state}", 2000)
 
     # ---- MDI view mode --------------------------------------------------------
 

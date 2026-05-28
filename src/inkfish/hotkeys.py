@@ -25,3 +25,4 @@ def register_shortcuts(window: "MainWindow") -> None:
     window._act_new_editor.setShortcut(QKeySequence("Ctrl+N"))
     window._act_close_editor.setShortcut(QKeySequence("Ctrl+W"))
     window._act_toggle_mdi_mode.setShortcut(QKeySequence("Ctrl+Shift+M"))
+    window._act_toggle_lod.setShortcut(QKeySequence("Ctrl+Shift+L"))

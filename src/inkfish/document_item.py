@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QKeyEvent, QTextCursor, QTextDocument
-from PyQt6.QtWidgets import QGraphicsTextItem
+from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QColor, QFont, QFontMetricsF, QKeyEvent, QPainter, QTextCursor, QTextDocument,
+)
+from PyQt6.QtWidgets import QGraphicsTextItem, QStyleOptionGraphicsItem
 
+from . import lod
 from .folding import FoldRegion, find_fold_regions
 
 
@@ -60,6 +63,78 @@ class DocumentItem(QGraphicsTextItem):
         self._folds: dict[int, _FoldedSection] = {}
         self._vim = None          # VimEngine | None
         self._last_search: str = ""
+
+        fm = QFontMetricsF(font)
+        self._font_line_height_px: float = fm.height()
+        self._char_w: float = fm.horizontalAdvance("M")
+        self._dom_color_cache: dict[int, tuple[int, QColor]] = {}
+
+    _DOM_COLOR_CACHE_MAX = 50000
+
+    # ---- paint (LOD optimisation) ---------------------------------------------
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        if lod.lod_enabled():
+            lod_val = QStyleOptionGraphicsItem.levelOfDetailFromTransform(
+                painter.worldTransform()
+            )
+            if self._font_line_height_px * lod_val < lod.threshold_px():
+                self._paint_lod(painter, option.exposedRect)
+                return
+        super().paint(painter, option, widget)
+
+    def _paint_lod(self, painter: QPainter, exposed: QRectF) -> None:
+        doc = self.document()
+        dl = doc.documentLayout()
+        pos = dl.hitTest(QPointF(0.0, exposed.top()), Qt.HitTestAccuracy.FuzzyHit)
+        if pos < 0:
+            pos = 0
+        block = doc.findBlock(pos)
+        if not block.isValid():
+            return
+        bottom_y = exposed.bottom()
+        char_w = self._char_w
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(Qt.PenStyle.NoPen)
+        while block.isValid():
+            br = dl.blockBoundingRect(block)
+            if br.top() > bottom_y:
+                break
+            text = block.text()
+            n = len(text.rstrip())
+            if n > 0:
+                indent = len(text) - len(text.lstrip())
+                w = (n - indent) * char_w
+                if w > 0.0:
+                    color = self._dominant_color(block)
+                    x = br.left() + indent * char_w
+                    y = br.top() + br.height() * 0.3
+                    h = br.height() * 0.4
+                    painter.fillRect(QRectF(x, y, w, h), color)
+            block = block.next()
+        painter.restore()
+
+    def _dominant_color(self, block) -> QColor:
+        key = block.blockNumber()
+        rev = block.revision()
+        entry = self._dom_color_cache.get(key)
+        if entry is not None and entry[0] == rev:
+            return entry[1]
+        color = lod.FALLBACK_BAR_COLOR
+        layout = block.layout()
+        if layout is not None:
+            best_len = 0
+            for fr in layout.formats():
+                if fr.length > best_len:
+                    fg = fr.format.foreground()
+                    if fg.style() != Qt.BrushStyle.NoBrush:
+                        color = fg.color()
+                        best_len = fr.length
+        if len(self._dom_color_cache) >= self._DOM_COLOR_CACHE_MAX:
+            self._dom_color_cache.clear()
+        self._dom_color_cache[key] = (rev, color)
+        return color
 
     # ---- text accessors -------------------------------------------------------
 

@@ -1,7 +1,7 @@
 """Find / Replace bar — inline panel docked at the bottom of EditorPane."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QRegularExpression, Qt, pyqtSignal
+from PyQt6.QtCore import QRegularExpression, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QTextCursor, QTextDocument
 from PyQt6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -17,12 +17,18 @@ class FindReplaceBar(QWidget):
 
     closed = pyqtSignal()
 
+    _MAX_MATCHES = 10000
+
     def __init__(self, pane, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pane = pane
         self._doc_item = pane._doc_item
         self._last_flags = QTextDocument.FindFlag(0)
         self._build_ui()
+        self._count_timer = QTimer(self)
+        self._count_timer.setSingleShot(True)
+        self._count_timer.setInterval(150)
+        self._count_timer.timeout.connect(self._do_update_count)
         self.setVisible(False)
 
     # ---- construction ---------------------------------------------------------
@@ -251,6 +257,9 @@ class FindReplaceBar(QWidget):
         self._update_count()
 
     def _update_count(self) -> None:
+        self._count_timer.start()
+
+    def _do_update_count(self) -> None:
         pattern = self._make_pattern()
         if pattern is None:
             self._count_lbl.setText("")
@@ -262,6 +271,7 @@ class FindReplaceBar(QWidget):
         total = 0
         current_idx = 0
         sel_start = self._doc_item.textCursor().selectionStart()
+        capped = False
         while True:
             found = doc.find(pattern, cursor, flags)
             if found.isNull():
@@ -269,10 +279,16 @@ class FindReplaceBar(QWidget):
             total += 1
             if found.selectionStart() <= sel_start:
                 current_idx = total
+            if total >= self._MAX_MATCHES:
+                capped = True
+                break
             cursor.setPosition(found.selectionEnd())
         if total == 0:
             self._count_lbl.setText("no matches")
             self._count_lbl.setStyleSheet("color: #e05050;")
+        elif capped:
+            self._count_lbl.setText(f"{current_idx}+ / >{self._MAX_MATCHES}")
+            self._count_lbl.setStyleSheet("color: #888;")
         else:
             self._count_lbl.setText(f"{current_idx} / {total}")
             self._count_lbl.setStyleSheet("color: #888;")
