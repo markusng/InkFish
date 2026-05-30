@@ -63,6 +63,7 @@ class DocumentItem(QGraphicsTextItem):
         self._folds: dict[int, _FoldedSection] = {}
         self._vim = None          # VimEngine | None
         self._last_search: str = ""
+        self._paint_suppressed: bool = False
 
         fm = QFontMetricsF(font)
         self._font_line_height_px: float = fm.height()
@@ -74,6 +75,8 @@ class DocumentItem(QGraphicsTextItem):
     # ---- paint (LOD optimisation) ---------------------------------------------
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
+        if self._paint_suppressed:
+            return
         if lod.lod_enabled():
             lod_val = QStyleOptionGraphicsItem.levelOfDetailFromTransform(
                 painter.worldTransform()

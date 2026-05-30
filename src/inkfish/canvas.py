@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import math
 
-from PyQt6.QtCore import QEvent, QPointF, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QMouseEvent, QPainter, QTransform, QWheelEvent
+from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPixmap, QTransform, QWheelEvent
 from PyQt6.QtWidgets import QGestureEvent, QGraphicsScene, QGraphicsView, QWidget
 
 from . import lod
@@ -27,6 +27,12 @@ class InkfishView(QGraphicsView):
     zoom_changed = pyqtSignal(float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        # Initialise buffer state before super().__init__() — Qt calls
+        # scrollContentsBy() during construction, before our assignments run.
+        self._buffer: QPixmap | None = None
+        self._buffer_scene_rect: QRectF | None = None
+        self._buffer_multiplier: int = 0
+        self._buffer_refresh_pending: bool = False
         scene = QGraphicsScene(parent)
         super().__init__(scene, parent)
 
@@ -66,6 +72,8 @@ class InkfishView(QGraphicsView):
         self._in_clamp: bool = False  # re-entry guard for scroll-bar valueChanged
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
         self.verticalScrollBar().valueChanged.connect(self._on_scroll_value_changed)
+
+        self.document_item.document().contentsChanged.connect(self._invalidate_buffer)
 
         # Render hints follow zoom: skip text/edge antialiasing at sub-pixel scales.
         self.zoom_changed.connect(lambda _s: self._apply_render_hints_for_scale())
@@ -112,6 +120,7 @@ class InkfishView(QGraphicsView):
 
     def _on_nav_idle(self) -> None:
         self._set_navigating(False)
+        self._invalidate_buffer()
 
     def zoom_to(self, factor: float, anchor: QPointF | None = None) -> None:
         if factor <= 0:
@@ -135,6 +144,8 @@ class InkfishView(QGraphicsView):
         self._clamp_scroll_to_doc()
         self._set_navigating(True)
         self.zoom_changed.emit(self.current_scale())
+        self._invalidate_buffer()
+        self._schedule_buffer_refresh()
 
     def set_line_numbers_visible(self, visible: bool) -> None:
         self._line_number_item.setVisible(visible)
@@ -153,6 +164,8 @@ class InkfishView(QGraphicsView):
         self.centerOn(self.document_item)
         self._clamp_scroll_to_doc()
         self.zoom_changed.emit(self.current_scale())
+        self._invalidate_buffer()
+        self._schedule_buffer_refresh()
 
     def fit_page(self) -> None:
         """Zoom so the whole document fits in the viewport, centred. Respects MIN/MAX_SCALE."""
@@ -170,6 +183,8 @@ class InkfishView(QGraphicsView):
         self.centerOn(self.document_item)
         self._clamp_scroll_to_doc()
         self.zoom_changed.emit(self.current_scale())
+        self._invalidate_buffer()
+        self._schedule_buffer_refresh()
 
     def set_pan_clamp(self, enabled: bool) -> None:
         self._pan_clamp_enabled = enabled
@@ -256,6 +271,99 @@ class InkfishView(QGraphicsView):
         h.setValue(h.value() - int(round(dx)))
         v.setValue(v.value() - int(round(dy)))
         self._clamp_scroll_to_doc()
+
+    # ---- pan raster buffer ----------------------------------------------------
+
+    def set_buffer_multiplier(self, n: int) -> None:
+        self._buffer_multiplier = n
+        self._invalidate_buffer()
+        if n > 0:
+            self._schedule_buffer_refresh()
+
+    def _invalidate_buffer(self) -> None:
+        self._buffer = None
+        self._buffer_scene_rect = None
+
+    def _schedule_buffer_refresh(self) -> None:
+        if not self._buffer_refresh_pending and self._buffer_multiplier > 0:
+            self._buffer_refresh_pending = True
+            QTimer.singleShot(0, self._refresh_buffer)
+
+    def _refresh_buffer(self) -> None:
+        self._buffer_refresh_pending = False
+        if self._buffer_multiplier <= 0:
+            return
+        vp_rect = self.viewport().rect()
+        if vp_rect.width() <= 0 or vp_rect.height() <= 0:
+            return
+        sc = self.scene()
+        if sc is None:
+            return
+        n = self._buffer_multiplier
+        vp_scene_rect = self.mapToScene(vp_rect).boundingRect()
+        buf_h = vp_scene_rect.height() * n
+        buf_scene_rect = QRectF(
+            vp_scene_rect.x(),
+            vp_scene_rect.center().y() - buf_h / 2,
+            vp_scene_rect.width(),
+            buf_h,
+        )
+        buf_px_w = vp_rect.width()
+        buf_px_h = vp_rect.height() * n
+        pixmap = QPixmap(buf_px_w, buf_px_h)
+        pixmap.fill(self.backgroundBrush().color())
+        painter = QPainter(pixmap)
+        painter.setRenderHints(self.renderHints())
+        sc.render(painter, QRectF(0, 0, buf_px_w, buf_px_h), buf_scene_rect)
+        painter.end()
+        self._buffer = pixmap
+        self._buffer_scene_rect = buf_scene_rect
+        self.viewport().update()
+
+    def _viewport_in_buffer(self) -> bool:
+        if self._buffer is None or self._buffer_scene_rect is None:
+            return False
+        vp_scene_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+        return self._buffer_scene_rect.contains(vp_scene_rect)
+
+    _BUFFER_TINT = QColor(0, 200, 80, 40)  # semi-transparent green debug overlay
+
+    def drawBackground(self, painter: QPainter, rect) -> None:
+        super().drawBackground(painter, rect)
+        if self._buffer is not None and self._viewport_in_buffer():
+            painter.drawPixmap(
+                self._buffer_scene_rect,
+                self._buffer,
+                QRectF(self._buffer.rect()),
+            )
+            painter.fillRect(self._buffer_scene_rect, self._BUFFER_TINT)
+
+    def paintEvent(self, event) -> None:
+        in_buf = self._viewport_in_buffer()
+        if in_buf:
+            self.document_item._paint_suppressed = True
+            self._line_number_item._paint_suppressed = True
+        super().paintEvent(event)
+        if in_buf:
+            self.document_item._paint_suppressed = False
+            self._line_number_item._paint_suppressed = False
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        if not getattr(self, '_buffer_multiplier', 0):
+            return
+        if self._buffer is None or self._buffer_scene_rect is None:
+            self._schedule_buffer_refresh()
+            return
+        vp_scene_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+        threshold = self._buffer_scene_rect.height() / self._buffer_multiplier
+        if (vp_scene_rect.top() < self._buffer_scene_rect.top() + threshold
+                or vp_scene_rect.bottom() > self._buffer_scene_rect.bottom() - threshold):
+            self._schedule_buffer_refresh()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._invalidate_buffer()
 
     # ---- mouse fallback -------------------------------------------------------
 

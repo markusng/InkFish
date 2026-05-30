@@ -43,6 +43,9 @@ class MainWindow(QMainWindow):
         self._act_pan_clamp.setChecked(bool(prefs.get("pan_clamp", False)))
         lod.set_threshold_px(prefs.get("lod_threshold_px", lod.DEFAULT_THRESHOLD_PX))
         self._act_toggle_lod.setChecked(lod.lod_enabled())
+        pan_buf = prefs.get("pan_buffer_multiplier", 0)
+        if pan_buf in self._pan_buf_actions:
+            self._pan_buf_actions[pan_buf].setChecked(True)
         self._restore_session(prefs)
 
     # ---- menus / status bar ---------------------------------------------------
@@ -127,7 +130,19 @@ class MainWindow(QMainWindow):
         self._act_toggle_lod.triggered.connect(self.toggle_lod)
         view_menu.addAction(self._act_toggle_lod)
 
-        # ---- Window menu ----
+        buf_menu = view_menu.addMenu("Pan &Buffer")
+        buf_group = QActionGroup(self)
+        self._pan_buf_actions: dict[int, QAction] = {}
+        for label, n in (("&Off", 0), ("&2×", 2), ("&4×", 4), ("&8×", 8)):
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setChecked(n == 0)
+            act.triggered.connect(lambda checked, v=n: self._set_pan_buffer(v))
+            buf_group.addAction(act)
+            buf_menu.addAction(act)
+            self._pan_buf_actions[n] = act
+
+# ---- Window menu ----
         win_menu = self.menuBar().addMenu("&Window")
 
         mode_group = QActionGroup(self)
@@ -200,6 +215,9 @@ class MainWindow(QMainWindow):
             pane.set_line_numbers_visible(True)
         if prefs.get("pan_clamp"):
             pane.set_pan_clamp(True)
+        pan_buf = prefs.get("pan_buffer_multiplier", 0)
+        if pan_buf > 0:
+            pane.view.set_buffer_multiplier(pan_buf)
         sw = EditorSubWindow(pane)
         self._mdi.addSubWindow(sw)
         sw.show()
@@ -341,6 +359,15 @@ class MainWindow(QMainWindow):
                 pane.view.viewport().update()
         state = "on" if lod.lod_enabled() else "off"
         self.statusBar().showMessage(f"LOD: {state}", 2000)
+
+    def _set_pan_buffer(self, n: int) -> None:
+        for sw in self._mdi.subWindowList():
+            pane = sw.widget()
+            if pane is not None:
+                pane.view.set_buffer_multiplier(n)
+        settings.save({**settings.load(), "pan_buffer_multiplier": n})
+        label = "off" if n == 0 else f"{n}×"
+        self.statusBar().showMessage(f"Pan buffer: {label}", 2000)
 
     # ---- MDI view mode --------------------------------------------------------
 

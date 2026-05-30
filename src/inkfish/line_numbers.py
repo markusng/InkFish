@@ -18,6 +18,7 @@ class LineNumberItem(QGraphicsItem):
         super().__init__()
         self._doc_item = doc_item
         self._gutter_w = 40.0
+        self._paint_suppressed: bool = False
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         # contentsChanged fires on every keystroke — only a visual refresh is needed.
         # blockCountChanged drives geometry (gutter width may change at decade boundaries).
@@ -32,6 +33,8 @@ class LineNumberItem(QGraphicsItem):
         return QRectF(0.0, 0.0, self._gutter_w, h)
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
+        if self._paint_suppressed:
+            return
         painter.save()
         exposed = option.exposedRect
         painter.fillRect(exposed, _BG)

@@ -37,3 +37,5 @@ def set_threshold_px(value: float) -> None:
         return
     if v > 0:
         _threshold_px = v
+
+
